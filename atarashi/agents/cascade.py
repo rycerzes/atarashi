@@ -5,27 +5,44 @@ SPDX-License-Identifier: GPL-2.0-only
 """
 from atarashi.agents.atarashiAgent import AtarashiAgent
 from atarashi.libs.decision import DEFAULT_MIN_SCORE, apply_abstention
+from atarashi.libs.sequence import LicenseMatcher
 from atarashi.spdx.resolver import detect_and_resolve
 
 
 class Cascade(AtarashiAgent):
-    """License identification cascade.
+    """License identification cascade, precision first.
 
-    Phase 0: resolve an author-declared ``SPDX-License-Identifier`` (the highest-
-    precision signal in real source files); if none maps to a known license,
-    abstain (UNKNOWN) rather than emit a low-confidence guess. Later phases insert
-    exact-hash and sequence matching before the abstention step.
+    Stages, each handling what the cheaper one could not, then abstaining:
+      1. author-declared ``SPDX-License-Identifier`` (highest precision);
+      2. exact normalized full-text match (input *is* a known license);
+      3. token-sequence coverage match (license text embedded in the input);
+      4. UNKNOWN — no confident match, rather than a low-confidence guess.
     """
 
     def __init__(self, licenseList, verbose=0, threshold=DEFAULT_MIN_SCORE):
         super().__init__(licenseList, verbose)
         self.threshold = threshold
+        references = dict(zip(self.licenseList["shortname"], self.licenseList["processed_text"]))
+        self.matcher = LicenseMatcher(references)
 
     def scan(self, filePath):
-        """Scan ``filePath`` and return result dicts (SPDX matches, or one UNKNOWN)."""
+        """Scan ``filePath`` and return ranked result dicts (or one UNKNOWN)."""
         with open(filePath, errors="replace") as in_file:
             raw = in_file.read()
+
         spdx = detect_and_resolve(raw, self.licenseList["shortname"])
         if spdx:
             return spdx
+
+        exact = self.matcher.exact(raw)
+        if exact:
+            return [{"shortname": exact, "sim_type": "ExactFullText",
+                     "sim_score": 1.0, "description": ""}]
+
+        hits = self.matcher.match(raw, min_score=self.threshold)
+        if hits:
+            return [{"shortname": h.shortname, "sim_type": "SequenceCoverage",
+                     "sim_score": round(h.score, 4),
+                     "description": f"matched tokens {h.start}:{h.end}"} for h in hits]
+
         return apply_abstention([], self.threshold)

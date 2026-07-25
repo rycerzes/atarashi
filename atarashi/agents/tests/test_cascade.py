@@ -7,9 +7,13 @@ import pandas as pd
 
 from atarashi.agents.cascade import Cascade
 
-LICENSES = pd.DataFrame(
-    {"shortname": ["MIT", "Apache-2.0", "GPL-2.0"], "processed_text": ["", "", ""]}
-)
+MIT_TEXT = ("Permission is hereby granted, free of charge, to any person obtaining a "
+            "copy of this software and associated documentation files, to deal in the "
+            "Software without restriction.")
+LICENSES = pd.DataFrame({
+    "shortname": ["MIT", "Apache-2.0", "GPL-2.0"],
+    "processed_text": [MIT_TEXT, "", ""],
+})
 
 
 def _scan(tmp_path, content):
@@ -23,6 +27,19 @@ def test_spdx_tag_resolved(tmp_path):
     assert out[0]["shortname"] == "MIT"
     assert out[0]["sim_type"] == "SPDXIdentifier"
     assert out[0]["sim_score"] == 1.0
+
+
+def test_exact_full_text(tmp_path):
+    out = _scan(tmp_path, MIT_TEXT)
+    assert out[0]["shortname"] == "MIT"
+    assert out[0]["sim_type"] == "ExactFullText"
+
+
+def test_embedded_license_text_sequence_match(tmp_path):
+    out = _scan(tmp_path, "/*\n * Copyright 2020 Acme\n * " + MIT_TEXT + "\n */\nint main(){}")
+    assert out[0]["shortname"] == "MIT"
+    assert out[0]["sim_type"] == "SequenceCoverage"
+    assert out[0]["sim_score"] >= 0.9
 
 
 def test_no_license_abstains(tmp_path):
