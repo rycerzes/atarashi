@@ -77,6 +77,7 @@ include = [
     "atarashi/libs/decision.py",
     "atarashi/libs/gate.py",
     "atarashi/agents/cascade.py",
+    "atarashi/libs/normalize.py",
 ]
 typeCheckingMode = "standard"
 exclude = ["build", "dist", "**/__pycache__", "**/.*"]
