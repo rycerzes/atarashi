@@ -75,6 +75,7 @@ pythonVersion = "3.10"
 include = [
     "atarashi/spdx",
     "atarashi/libs/decision.py",
+    "atarashi/libs/gate.py",
 ]
 typeCheckingMode = "standard"
 exclude = ["build", "dist", "**/__pycache__", "**/.*"]
