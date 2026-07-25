@@ -22,8 +22,18 @@ class Cascade(AtarashiAgent):
     def __init__(self, licenseList, verbose=0, threshold=DEFAULT_MIN_SCORE):
         super().__init__(licenseList, verbose)
         self.threshold = threshold
-        references = dict(zip(self.licenseList["shortname"], self.licenseList["processed_text"]))
-        self.matcher = LicenseMatcher(references)
+        self.matcher = LicenseMatcher(self._reference_units())
+
+    def _reference_units(self):
+        """Full license text plus header/notice text as separate matchable units."""
+        has_header = "processed_header" in self.licenseList.columns
+        for _, row in self.licenseList.iterrows():
+            name = str(row["shortname"])
+            yield (name, str(row["processed_text"]))
+            if has_header:
+                header = row["processed_header"]
+                if isinstance(header, str) and header.strip():
+                    yield (name, header)
 
     def scan(self, filePath):
         """Scan ``filePath`` and return ranked result dicts (or one UNKNOWN)."""

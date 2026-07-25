@@ -10,9 +10,12 @@ from atarashi.agents.cascade import Cascade
 MIT_TEXT = ("Permission is hereby granted, free of charge, to any person obtaining a "
             "copy of this software and associated documentation files, to deal in the "
             "Software without restriction.")
+APACHE_HEADER = ("Licensed under the Apache License Version 2.0 you may not use this "
+                 "file except in compliance with the License you may obtain a copy")
 LICENSES = pd.DataFrame({
     "shortname": ["MIT", "Apache-2.0", "GPL-2.0"],
-    "processed_text": [MIT_TEXT, "", ""],
+    "processed_text": [MIT_TEXT, "Apache License Version 2.0 full body text here", ""],
+    "processed_header": ["", APACHE_HEADER, ""],
 })
 
 
@@ -50,3 +53,9 @@ def test_no_license_abstains(tmp_path):
 def test_unknown_spdx_id_abstains(tmp_path):
     out = _scan(tmp_path, "# SPDX-License-Identifier: Nonexistent-9.9\n")
     assert out[0]["shortname"] == "UNKNOWN"
+
+
+def test_notice_header_matches_via_header_unit(tmp_path):
+    out = _scan(tmp_path, "# " + APACHE_HEADER + "\nimport os\n")
+    assert out[0]["shortname"] == "Apache-2.0"
+    assert out[0]["sim_type"] == "SequenceCoverage"
