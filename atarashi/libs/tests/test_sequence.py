@@ -22,35 +22,47 @@ def test_exact_full_text():
 def test_embedded_notice_matches_with_span():
     m = LicenseMatcher(REFS)
     doc = "/*\n * Copyright 2020 Acme\n * " + MIT + "\n */\nint main(){}"
-    hits = m.match(doc, min_score=0.8)
+    hits = m.match(doc)
     assert hits and hits[0].shortname == "MIT"
     assert hits[0].score >= 0.9
     # matched span points into the query token stream
     assert 0 <= hits[0].start < hits[0].end
 
 
-def test_picks_higher_coverage_reference():
+def test_picks_matching_reference():
     m = LicenseMatcher(REFS)
-    assert m.match(BSD, min_score=0.8)[0].shortname == "BSD-3-Clause"
+    assert m.match(BSD)[0].shortname == "BSD-3-Clause"
 
 
 def test_no_license_text_returns_empty():
     m = LicenseMatcher(REFS)
-    assert m.match("int main() { return 0; } // just code, no license", min_score=0.5) == []
+    assert m.match("int main() { return 0; } // just code, no license") == []
 
 
 def test_partial_presence_scores_below_full():
     m = LicenseMatcher(REFS)
     half = "Permission is hereby granted, free of charge, to any person"
-    hits = m.match(half, min_score=0.1)
+    hits = m.match(half)
     assert hits and hits[0].shortname == "MIT"
-    assert hits[0].score < 1.0
+    assert hits[0].score < 1.0  # coverage of the reference is partial
 
 
-def test_min_score_filters_weak_matches():
+def test_min_run_filters_short_contiguous_matches():
     m = LicenseMatcher(REFS)
-    half = "Permission is hereby granted, free of charge, to any person"
-    assert m.match(half, min_score=0.95) == []
+    half = "Permission is hereby granted, free of charge, to any person"  # ~10-token run
+    assert m.match(half, min_run=20) == []
+
+
+def test_longest_run_ranking_beats_higher_raw_coverage():
+    # SHORT ref shares scattered words with the query (higher coverage), LONG ref
+    # shares one distinctive contiguous run — the long contiguous run must win.
+    query = ("this software is provided under the following distinctive license grant "
+             "clause alpha beta gamma delta epsilon zeta eta theta as written here")
+    short_scattered = "this software the following license clause as here provided under"
+    long_run = ("distinctive license grant clause alpha beta gamma delta epsilon zeta "
+                "eta theta")
+    m = LicenseMatcher([("SCATTERED", short_scattered), ("RUN", long_run)])
+    assert m.match(query)[0].shortname == "RUN"
 
 
 AGPL = ("This program is free software you can redistribute it under the terms of the "
@@ -60,13 +72,10 @@ GPL = ("This program is free software you can redistribute it under the terms of
 
 
 def test_required_phrase_gates_out_wrong_variant():
-    # both share most text; the required "affero" phrase separates them
     refs = [("AGPL-3.0", AGPL), ("GPL-3.0", GPL)]
     required = [("AGPL-3.0", ["affero general public license"])]
     m = LicenseMatcher(refs, required=required)
-    # a GPL notice (no "affero") must not match AGPL even though coverage is high
-    hits = m.match(GPL, min_score=0.5)
-    names = [h.shortname for h in hits]
+    names = [h.shortname for h in m.match(GPL)]
     assert "AGPL-3.0" not in names
     assert "GPL-3.0" in names
 
@@ -74,18 +83,16 @@ def test_required_phrase_gates_out_wrong_variant():
 def test_required_phrase_present_allows_match():
     refs = [("AGPL-3.0", AGPL)]
     m = LicenseMatcher(refs, required=[("AGPL-3.0", ["affero general public license"])])
-    assert m.match(AGPL, min_score=0.5)[0].shortname == "AGPL-3.0"
+    assert m.match(AGPL)[0].shortname == "AGPL-3.0"
 
 
 def test_multiple_units_per_license_header_matches():
-    # a license carries both a full text and a short header/notice unit
     full = ("Apache License Version 2.0 January 2004 terms and conditions for use "
             "reproduction and distribution as defined by sections below")
     header = ("Licensed under the Apache License Version 2.0 you may not use this file "
               "except in compliance with the License")
     m = LicenseMatcher([("Apache-2.0", full), ("Apache-2.0", header)])
     doc = "# " + header + "\nimport os\n"
-    hits = m.match(doc, min_score=0.8)
-    # reported once, resolved via the header unit
+    hits = m.match(doc)
     assert [h.shortname for h in hits] == ["Apache-2.0"]
     assert hits[0].score >= 0.9

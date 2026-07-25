@@ -26,12 +26,18 @@ from difflib import SequenceMatcher as _DiffMatcher
 from atarashi.libs.normalize import normalize, tokens
 
 
+# A match must contain at least one contiguous run of this many tokens — a
+# distinctive license phrase — so scattered common-word overlap does not match.
+DEFAULT_MIN_RUN = 8
+
+
 @dataclass(frozen=True)
 class SpanMatch:
     """One reference matched within the query token stream."""
 
     shortname: str
-    score: float  # coverage of the reference, in [0, 1]
+    score: float  # coverage of the reference (matched / ref_tokens), in [0, 1]
+    longest_run: int  # longest contiguous matched token run — the ranking signal
     matched_tokens: int
     ref_tokens: int
     start: int  # matched span start token index in the query (inclusive)
@@ -46,10 +52,9 @@ class LicenseMatcher:
     """Match input text against a fixed set of reference license texts."""
 
     def __init__(self, references: Iterable[tuple[str, str]],
-                 shingle: int = 4, min_tokens: int = 4,
+                 shingle: int = 4,
                  required: Iterable[tuple[str, list[str]]] | None = None):
         self.shingle = shingle
-        self.min_tokens = min_tokens
         # A license may have several reference units (full text, header/notice, …),
         # so units are stored by index and mapped back to a shortname.
         self._unit_name: list[str] = []
@@ -90,11 +95,14 @@ class LicenseMatcher:
             candidates |= self._index.get(shingle_key, set())
         return candidates
 
-    def match(self, query: str, min_score: float = 0.5, top_k: int = 5) -> list[SpanMatch]:
-        """Return the best reference matches within ``query``, ranked by coverage.
+    def match(self, query: str, min_run: int = DEFAULT_MIN_RUN, top_k: int = 5) -> list[SpanMatch]:
+        """Return the best reference matches within ``query``, ranked by the longest
+        contiguous matched run.
 
-        A license with several units (full text + header/notice) is reported once,
-        keeping its best-covering unit.
+        Ranking by the longest run (not coverage) rewards a distinctive license
+        phrase over scattered common-word overlap, and is robust to references of
+        different lengths. A license with several units (full text + header/notice)
+        is reported once, keeping its strongest unit.
         """
         q_tokens = tokens(query)
         if len(q_tokens) < self.shingle:
@@ -108,17 +116,20 @@ class LicenseMatcher:
             ref = self._unit_tokens[uid]
             blocks = [b for b in _DiffMatcher(None, ref, q_tokens, autojunk=False)
                       .get_matching_blocks() if b.size > 0]
+            if not blocks:
+                continue
+            longest = max(b.size for b in blocks)
+            if longest < min_run:
+                continue
             matched = sum(b.size for b in blocks)
-            if matched < self.min_tokens:
-                continue
-            score = matched / len(ref)
-            if score < min_score:
-                continue
             start = min(b.b for b in blocks)
             end = max(b.b + b.size for b in blocks)
-            cand = SpanMatch(name, score, matched, len(ref), start, end)
+            cand = SpanMatch(name, matched / len(ref), longest, matched, len(ref), start, end)
             prev = best.get(name)
-            if prev is None or (cand.score, cand.matched_tokens) > (prev.score, prev.matched_tokens):
+            if prev is None or (cand.longest_run, cand.score) > (prev.longest_run, prev.score):
                 best[name] = cand
-        results = sorted(best.values(), key=lambda m: (m.score, m.matched_tokens), reverse=True)
+        # Longest contiguous run first (distinctive phrase); ties broken by coverage
+        # so the reference the query most fully fills (e.g. MIT over an MIT-superset
+        # like Xnet/X11) wins over a looser superset match.
+        results = sorted(best.values(), key=lambda m: (m.longest_run, m.score), reverse=True)
         return results[:top_k]

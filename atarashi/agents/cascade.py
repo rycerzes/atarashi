@@ -4,8 +4,8 @@
 SPDX-License-Identifier: GPL-2.0-only
 """
 from atarashi.agents.atarashiAgent import AtarashiAgent
-from atarashi.libs.decision import DEFAULT_MIN_SCORE, apply_abstention
-from atarashi.libs.sequence import LicenseMatcher
+from atarashi.libs.decision import apply_abstention
+from atarashi.libs.sequence import DEFAULT_MIN_RUN, LicenseMatcher
 from atarashi.spdx.resolver import detect_and_resolve
 
 
@@ -19,9 +19,9 @@ class Cascade(AtarashiAgent):
       4. UNKNOWN — no confident match, rather than a low-confidence guess.
     """
 
-    def __init__(self, licenseList, verbose=0, threshold=DEFAULT_MIN_SCORE):
+    def __init__(self, licenseList, verbose=0, min_run=DEFAULT_MIN_RUN):
         super().__init__(licenseList, verbose)
-        self.threshold = threshold
+        self.min_run = min_run
         self.matcher = LicenseMatcher(self._reference_units())
 
     def _reference_units(self):
@@ -49,10 +49,10 @@ class Cascade(AtarashiAgent):
             return [{"shortname": exact, "sim_type": "ExactFullText",
                      "sim_score": 1.0, "description": ""}]
 
-        hits = self.matcher.match(raw, min_score=self.threshold)
+        hits = self.matcher.match(raw, min_run=self.min_run)
         if hits:
             return [{"shortname": h.shortname, "sim_type": "SequenceCoverage",
                      "sim_score": round(h.score, 4),
                      "description": f"matched tokens {h.start}:{h.end}"} for h in hits]
 
-        return apply_abstention([], self.threshold)
+        return apply_abstention([])
