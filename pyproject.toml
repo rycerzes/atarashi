@@ -72,6 +72,9 @@ ignore = ["E501"]
 pythonVersion = "3.10"
 # Scoped to actively-developed modules; legacy agents predate typing and are
 # covered by their own tests. Broaden as the cascade replaces them.
-include = ["atarashi/spdx"]
+include = [
+    "atarashi/spdx",
+    "atarashi/libs/decision.py",
+]
 typeCheckingMode = "standard"
 exclude = ["build", "dist", "**/__pycache__", "**/.*"]
