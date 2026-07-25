@@ -45,12 +45,20 @@ def _shingles(toks: list[str], n: int) -> set[tuple[str, ...]]:
 class LicenseMatcher:
     """Match input text against a fixed set of reference license texts."""
 
-    def __init__(self, references: Mapping[str, str], shingle: int = 4, min_tokens: int = 4):
+    def __init__(self, references: Mapping[str, str], shingle: int = 4, min_tokens: int = 4,
+                 required: Mapping[str, list[str]] | None = None):
         self.shingle = shingle
         self.min_tokens = min_tokens
         self._ref_tokens: dict[str, list[str]] = {}
         self._index: dict[tuple[str, ...], set[str]] = {}
         self._exact: dict[str, str] = {}
+        # Key phrases that MUST appear in the input for a reference to match — the
+        # lever that keeps generic boilerplate from matching and separates close
+        # variants (e.g. an "Affero"/version clause). Empty => no gating.
+        self._required: dict[str, list[list[str]]] = {
+            name: [tokens(p) for p in phrases if tokens(p)]
+            for name, phrases in (required or {}).items()
+        }
         for name, text in references.items():
             toks = tokens(text)
             if not toks:
@@ -59,6 +67,12 @@ class LicenseMatcher:
             self._ref_tokens[name] = toks
             for shingle_key in _shingles(toks, shingle):
                 self._index.setdefault(shingle_key, set()).add(name)
+
+    def _has_required(self, name: str, q_joined: str) -> bool:
+        phrases = self._required.get(name)
+        if not phrases:
+            return True
+        return all(f" {' '.join(p)} " in q_joined for p in phrases)
 
     def exact(self, query: str) -> str | None:
         """Return a shortname when the whole normalized input equals a reference."""
@@ -75,8 +89,11 @@ class LicenseMatcher:
         q_tokens = tokens(query)
         if len(q_tokens) < self.shingle:
             return []
+        q_joined = f" {' '.join(q_tokens)} "
         results: list[SpanMatch] = []
         for name in self._candidates(q_tokens):
+            if not self._has_required(name, q_joined):
+                continue
             ref = self._ref_tokens[name]
             blocks = [b for b in _DiffMatcher(None, ref, q_tokens, autojunk=False)
                       .get_matching_blocks() if b.size > 0]
