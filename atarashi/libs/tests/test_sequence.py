@@ -51,3 +51,27 @@ def test_min_score_filters_weak_matches():
     m = LicenseMatcher(REFS)
     half = "Permission is hereby granted, free of charge, to any person"
     assert m.match(half, min_score=0.95) == []
+
+
+AGPL = ("This program is free software you can redistribute it under the terms of the "
+        "GNU Affero General Public License as published by the Free Software Foundation.")
+GPL = ("This program is free software you can redistribute it under the terms of the "
+       "GNU General Public License as published by the Free Software Foundation.")
+
+
+def test_required_phrase_gates_out_wrong_variant():
+    # both share most text; the required "affero" phrase separates them
+    refs = {"AGPL-3.0": AGPL, "GPL-3.0": GPL}
+    required = {"AGPL-3.0": ["affero general public license"]}
+    m = LicenseMatcher(refs, required=required)
+    # a GPL notice (no "affero") must not match AGPL even though coverage is high
+    hits = m.match(GPL, min_score=0.5)
+    names = [h.shortname for h in hits]
+    assert "AGPL-3.0" not in names
+    assert "GPL-3.0" in names
+
+
+def test_required_phrase_present_allows_match():
+    refs = {"AGPL-3.0": AGPL}
+    m = LicenseMatcher(refs, required={"AGPL-3.0": ["affero general public license"]})
+    assert m.match(AGPL, min_score=0.5)[0].shortname == "AGPL-3.0"
