@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Cascade agent: SPDX-tag detection first, else abstain (Phase 0).
+"""Cascade agent: SPDX tag, then verbatim text, then span match, else UNKNOWN.
 
 SPDX-License-Identifier: GPL-2.0-only
 """
+import os
+
 from atarashi.agents.atarashiAgent import AtarashiAgent
-from atarashi.libs.decision import apply_abstention
+from atarashi.libs.commentPreprocessor import CommentPreprocessor
+from atarashi.libs.decision import (DEFAULT_MIN_COVERAGE, DEFAULT_STRONG_RUN,
+                                    is_confident, unknown_result)
+from atarashi.libs.gate import should_scan
 from atarashi.libs.sequence import DEFAULT_MIN_RUN, LicenseMatcher
 from atarashi.spdx.resolver import detect_and_resolve
 
@@ -17,11 +22,23 @@ class Cascade(AtarashiAgent):
       2. exact normalized full-text match (input *is* a known license);
       3. token-sequence coverage match (license text embedded in the input);
       4. UNKNOWN — no confident match, rather than a low-confidence guess.
+
+    Stages 2-3 run on the extracted comment block, not the raw file, so code is
+    not matched as if it were license prose. Stage 1 runs on the raw text because
+    a tag is a literal string that comment extraction may reformat.
+
+    Abstention is the common outcome, not an edge case: on real source files
+    carrying an SPDX tag, most have no license prose once the tag is stripped.
     """
 
-    def __init__(self, licenseList, verbose=0, min_run=DEFAULT_MIN_RUN):
+    def __init__(self, licenseList, verbose=0, min_run=DEFAULT_MIN_RUN,
+                 strong_run=DEFAULT_STRONG_RUN, min_coverage=DEFAULT_MIN_COVERAGE,
+                 use_gate=True):
         super().__init__(licenseList, verbose)
         self.min_run = min_run
+        self.strong_run = strong_run
+        self.min_coverage = min_coverage
+        self.use_gate = use_gate
         self.matcher = LicenseMatcher(self._reference_units())
 
     def _reference_units(self):
@@ -35,6 +52,27 @@ class Cascade(AtarashiAgent):
                 if isinstance(header, str) and header.strip():
                     yield (name, header)
 
+    @staticmethod
+    def _comment_text(filePath, fallback):
+        """The license comment block, or ``fallback`` if extraction is unavailable.
+
+        Returns the extracted text unnormalized; the matcher applies its own
+        normalization to query and references alike, so the legacy
+        ``CommentPreprocessor.preprocess`` transform is deliberately not used here
+        (it rewrites "(c)" to "copyright", which references are not subject to).
+        """
+        commentFile = None
+        try:
+            commentFile = CommentPreprocessor.extract(filePath)
+            with open(commentFile, errors="replace") as handle:
+                text = handle.read()
+            return text if text.strip() else fallback
+        except Exception:
+            return fallback
+        finally:
+            if commentFile and os.path.exists(commentFile):
+                os.unlink(commentFile)
+
     def scan(self, filePath):
         """Scan ``filePath`` and return ranked result dicts (or one UNKNOWN)."""
         with open(filePath, errors="replace") as in_file:
@@ -44,15 +82,23 @@ class Cascade(AtarashiAgent):
         if spdx:
             return spdx
 
-        exact = self.matcher.exact(raw)
+        text = self._comment_text(filePath, raw)
+        if self.use_gate and not should_scan(text):
+            return [unknown_result()]
+
+        exact = self.matcher.exact(text)
         if exact:
             return [{"shortname": exact, "sim_type": "ExactFullText",
                      "sim_score": 1.0, "description": ""}]
 
-        hits = self.matcher.match(raw, min_run=self.min_run)
-        if hits:
+        hits = self.matcher.match(text, min_run=self.min_run)
+        confident = [h for h in hits
+                     if is_confident(h.score, h.longest_run,
+                                     self.strong_run, self.min_coverage)]
+        if confident:
             return [{"shortname": h.shortname, "sim_type": "SequenceCoverage",
                      "sim_score": round(h.score, 4),
-                     "description": f"matched tokens {h.start}:{h.end}"} for h in hits]
+                     "description": f"matched tokens {h.start}:{h.end} "
+                                    f"(run {h.longest_run})"} for h in confident]
 
-        return apply_abstention([])
+        return [unknown_result(round(hits[0].score, 4) if hits else 0.0)]
