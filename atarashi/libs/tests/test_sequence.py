@@ -96,3 +96,38 @@ def test_multiple_units_per_license_header_matches():
     hits = m.match(doc)
     assert [h.shortname for h in hits] == ["Apache-2.0"]
     assert hits[0].score >= 0.9
+
+
+# --- seed-and-extend core -----------------------------------------------------
+
+def test_repetitive_reference_does_not_inflate_coverage():
+    """A repeated phrase must be counted once, not once per place it occurs.
+
+    Alignment seeds on shared n-grams and groups them by diagonal, so a single
+    query phrase matching a reference that repeats it produces one run per
+    occurrence. Summing those would report most of the reference as present when
+    only a fraction of it is — the query token must be spent once.
+    """
+    phrase = "redistribution and use in source and binary forms are permitted"
+    ref = " ".join([phrase] * 8)
+    matcher = LicenseMatcher([("Repeat-1.0", ref)])
+    hit = matcher.match(phrase, min_run=8)[0]
+    assert hit.longest_run == len(phrase.split())
+    # One of eight repetitions is present, so coverage must sit near an eighth —
+    # emphatically not near 1.0, which is what unchained runs would report.
+    assert hit.score < 0.2
+
+
+def test_span_locates_the_notice_inside_surrounding_noise():
+    notice = "permission is hereby granted free of charge to any person obtaining a copy"
+    matcher = LicenseMatcher([("MIT", notice)])
+    lead = "int main void return zero "
+    hit = matcher.match(lead + notice + " more unrelated trailing code here", min_run=8)[0]
+    assert hit.start == len(lead.split())
+    assert hit.end == hit.start + len(notice.split())
+
+
+def test_unseen_query_tokens_cannot_match():
+    """Tokens absent from every reference share an id; they must never align."""
+    matcher = LicenseMatcher([("MIT", "permission is hereby granted free of charge to any person")])
+    assert matcher.match("zzz qqq vvv www xxx yyy", min_run=4) == []
