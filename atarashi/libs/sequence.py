@@ -67,9 +67,11 @@ class LicenseMatcher:
     def __init__(self, references: Iterable[tuple[str, str]],
                  shingle: int = DEFAULT_SHINGLE,
                  required: Iterable[tuple[str, list[str]]] | None = None,
-                 max_candidates: int = DEFAULT_MAX_CANDIDATES):
+                 max_candidates: int = DEFAULT_MAX_CANDIDATES,
+                 unit_gating: bool = False):
         self.shingle = shingle
         self.max_candidates = max_candidates
+        self.unit_gating = unit_gating
         # Tokens are interned to ints once, so alignment compares machine integers
         # rather than strings and shingles pack into a single int key.
         self._vocab: dict[str, int] = {}
@@ -85,11 +87,22 @@ class LicenseMatcher:
         # Key phrases that MUST appear in the input for a reference to match — the
         # lever that keeps generic boilerplate from matching and separates close
         # variants (e.g. an "Affero"/version clause). Empty => no gating.
-        self._required: dict[str, list[list[str]]] = {
-            name: [tokens(p) for p in phrases if tokens(p)]
+        self._required: dict[str, list[str]] = {
+            name: [" ".join(tokens(p)) for p in phrases if tokens(p)]
             for name, phrases in (required or [])
         }
-        for name, text in references:
+        # Per-unit required phrases, from the `{{...}}` spans ScanCode marks in its
+        # rules. Off by default: measured on 246 notice queries, gating on them cost
+        # precision 0.9289 -> 0.9121 and R@1 0.9024 -> 0.8862. It does separate close
+        # variants — it fixed three EPL-1.0/EPL-2.0 confusions — but it broke five
+        # more, because dropping a license's strongest unit hands the query to a
+        # competing license rather than to abstention. Kept, tested, and available:
+        # the phrases are the right signal, a hard per-unit filter is the wrong use
+        # of it. Enable with `unit_gating=True`.
+        self._unit_required: list[list[str]] = []
+        for reference in references:
+            name, text = reference[0], reference[1]
+            phrases = reference[2] if len(reference) > 2 else ()
             toks = tokens(text)
             if not toks:
                 continue
@@ -100,6 +113,8 @@ class LicenseMatcher:
             self._unit_name.append(name)
             self._unit_ids.append(ids)
             self._unit_keys.append(keys)
+            self._unit_required.append(
+                [" ".join(tokens(p)) for p in phrases if tokens(p)])
             for key in set(keys):
                 self._index.setdefault(key, set()).add(uid)
 
@@ -134,7 +149,11 @@ class LicenseMatcher:
         phrases = self._required.get(name)
         if not phrases:
             return True
-        return all(f" {' '.join(p)} " in q_joined for p in phrases)
+        return all(f" {p} " in q_joined for p in phrases)
+
+    def _unit_has_required(self, uid: int, q_joined: str) -> bool:
+        """Every phrase the rule marks as required must appear in the query."""
+        return all(f" {p} " in q_joined for p in self._unit_required[uid])
 
     def exact(self, query: str) -> str | None:
         """Return a shortname when the whole normalized input equals a reference."""
@@ -201,6 +220,8 @@ class LicenseMatcher:
         for uid in candidates:
             name = self._unit_name[uid]
             if not self._has_required(name, q_joined):
+                continue
+            if self.unit_gating and not self._unit_has_required(uid, q_joined):
                 continue
             ref = self._unit_ids[uid]
             runs = self._runs(self._unit_keys[uid], qpos)

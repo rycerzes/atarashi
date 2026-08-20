@@ -157,3 +157,44 @@ def test_long_reference_still_requires_the_full_min_run():
     ref = " ".join(f"clause{i} of the agreement" for i in range(20))
     matcher = LicenseMatcher([("Long-1.0", ref)])
     assert matcher.match("clause3 of the agreement", min_run=8) == []
+
+
+# --- per-unit required phrases ------------------------------------------------
+
+def test_unit_required_phrase_separates_close_variants():
+    """MPL-2.0 and MPL-2.0-no-copyleft-exception differ by one clause. Without the
+    gate the shared body matches both and the variant is a coin flip."""
+    body = ("this source code form is subject to the terms of the mozilla public "
+            "license v 2.0 if a copy of the mpl was not distributed with this file")
+    refs = [
+        ("MPL-2.0", body, []),
+        ("MPL-2.0-no-copyleft-exception", body, ["no copyleft exception"]),
+    ]
+    matcher = LicenseMatcher(refs, unit_gating=True)
+    assert [h.shortname for h in matcher.match(body, min_run=8)] == ["MPL-2.0"]
+
+
+def test_unit_required_phrase_admits_the_variant_when_present():
+    body = "this source code form is subject to the terms of the mozilla public license"
+    refs = [("MPL-2.0-no-copyleft-exception", body, ["no copyleft exception"])]
+    matcher = LicenseMatcher(refs, unit_gating=True)
+    assert matcher.match(body, min_run=8) == []
+    assert [h.shortname for h in
+            matcher.match(body + " no copyleft exception", min_run=8)] == \
+        ["MPL-2.0-no-copyleft-exception"]
+
+
+def test_two_tuple_references_still_work():
+    """The 3-tuple form is an extension; plain (name, text) must keep working."""
+    matcher = LicenseMatcher([("MIT", "permission is hereby granted free of charge to any person")])
+    assert matcher.match("permission is hereby granted free of charge to any person",
+                         min_run=8)[0].shortname == "MIT"
+
+
+def test_unit_gating_is_off_by_default():
+    """Measured as a net loss on real queries; the phrases ship, the hard gate does
+    not. See the note in LicenseMatcher.__init__."""
+    body = "this source code form is subject to the terms of the mozilla public license"
+    refs = [("MPL-2.0-no-copyleft-exception", body, ["no copyleft exception"])]
+    assert LicenseMatcher(refs).match(body, min_run=8)[0].shortname == \
+        "MPL-2.0-no-copyleft-exception"

@@ -44,8 +44,8 @@ MIN_UNIT_TOKENS = 5
 
 def load_notice_units(shortnames: Iterable[str],
                       path: Path | None = None,
-                      min_tokens: int = MIN_UNIT_TOKENS) -> Iterator[tuple[str, str]]:
-    """Yield ``(shortname, text)`` notice units for licenses the caller knows.
+                      min_tokens: int = MIN_UNIT_TOKENS) -> Iterator[tuple[str, str, list[str]]]:
+    """Yield ``(shortname, text, required_phrases)`` for licenses the caller knows.
 
     Units keyed to a license absent from ``shortnames`` are dropped: the agent can
     only report licenses in its own list, so indexing the rest costs match time and
@@ -67,9 +67,11 @@ def load_notice_units(shortnames: Iterable[str],
         payload = json.loads(Path(path or DEFAULT_INDEX).read_text())
     except (OSError, ValueError):
         return
-    for spdx, text in payload.get("units", ()):
+    for unit in payload.get("units", ()):
+        spdx, text = unit[0], unit[1]
+        phrases = unit[2] if len(unit) > 2 else []
         if len(text.split()) < min_tokens:
             continue
         shortname = lookup_shortname(spdx, index)
         if shortname is not None:
-            yield shortname, text
+            yield shortname, text, phrases
