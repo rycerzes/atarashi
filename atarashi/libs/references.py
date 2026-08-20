@@ -22,27 +22,42 @@ import json
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 
-from atarashi.libs.sequence import DEFAULT_MIN_RUN
 from atarashi.spdx.resolver import lookup_shortname, shortname_index
 
 DEFAULT_INDEX = Path(__file__).resolve().parents[1] / "data" / "licenses" / "notice_rules.json"
 
+# Shortest reference unit worth indexing. Measured, not assumed — sweeping the floor
+# over the 246-query notice regime and the 2,145-query no-signal regime:
+#
+#   floor  coverage  precision   R@1    no-signal false answers
+#     4      65.9%     0.8765   0.5772        1.96%
+#     5      65.9%     0.8765   0.5772        1.96%
+#     6      62.2%     0.8693   0.5407        1.68%
+#     7      60.6%     0.8725   0.5285        1.35%
+#     8      59.8%     0.8707   0.5203        1.31%
+#
+# 5 dominates 4: identical on every measure while dropping ~700 dead units, so no
+# four-token rule earns its place. Below 8 the trade is roughly three extra correct
+# answers per extra false one, weighted by how often each regime occurs in real code.
+MIN_UNIT_TOKENS = 5
+
 
 def load_notice_units(shortnames: Iterable[str],
                       path: Path | None = None,
-                      min_tokens: int = DEFAULT_MIN_RUN) -> Iterator[tuple[str, str]]:
+                      min_tokens: int = MIN_UNIT_TOKENS) -> Iterator[tuple[str, str]]:
     """Yield ``(shortname, text)`` notice units for licenses the caller knows.
 
     Units keyed to a license absent from ``shortnames`` are dropped: the agent can
     only report licenses in its own list, so indexing the rest costs match time and
     buys nothing.
 
-    Units shorter than ``min_tokens`` are dropped too. A match requires a contiguous
-    run of at least ``DEFAULT_MIN_RUN`` tokens, so a shorter unit can never satisfy
-    it — it is dead weight in the index, and the short units are generic filler
-    ("licensed under a .") that could not attribute to one license anyway. The count
-    is a whitespace split rather than the matcher's tokenizer: an approximation, but
-    it avoids tokenizing 23k units twice at startup.
+    Units shorter than ``min_tokens`` are dropped; see ``MIN_UNIT_TOKENS`` for how
+    that floor was chosen. Filtering at ``DEFAULT_MIN_RUN`` instead threw away the
+    entire short-reference register — 700 of the 1,339 apache-2.0 rules — which is
+    the register real files most often carry. Those units are matchable, but only in
+    full; ``LicenseMatcher.match`` enforces that. The count is a whitespace split
+    rather than the matcher's tokenizer: an approximation, but it avoids tokenizing
+    23k units twice at startup.
 
     Missing or unreadable artifact yields nothing rather than raising, so an agent
     built before the index exists still runs on the full-text layer alone.

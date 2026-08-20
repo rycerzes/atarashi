@@ -29,7 +29,12 @@ from atarashi.libs.normalize import normalize, tokens
 
 # A match must contain at least one contiguous run of this many tokens — a
 # distinctive license phrase — so scattered common-word overlap does not match.
+# References shorter than this are exempt but must match in full; see `match`.
 DEFAULT_MIN_RUN = 8
+
+# Alignment seeds on n-grams, so this is the shortest reference that can be matched
+# at all. Also the floor for indexing a reference unit: anything shorter is unusable.
+DEFAULT_SHINGLE = 4
 
 # Shingles are packed positionally into one int key. The base must be fixed before
 # indexing starts — deriving it from vocabulary size would re-key every unit as the
@@ -60,7 +65,7 @@ class LicenseMatcher:
     """Match input text against a fixed set of reference license texts."""
 
     def __init__(self, references: Iterable[tuple[str, str]],
-                 shingle: int = 4,
+                 shingle: int = DEFAULT_SHINGLE,
                  required: Iterable[tuple[str, list[str]]] | None = None,
                  max_candidates: int = DEFAULT_MAX_CANDIDATES):
         self.shingle = shingle
@@ -202,7 +207,13 @@ class LicenseMatcher:
             if not runs:
                 continue
             longest = max(size for _, _, size in runs)
-            if longest < min_run:
+            # A reference shorter than min_run cannot produce a qualifying run, which
+            # made the whole short-reference register unmatchable — "Licensed under
+            # the Apache License, Version 2.0" is seven tokens, and 700 of the 1,339
+            # apache-2.0 rules are shorter than eight. Such a reference is admitted
+            # only when the query contains it *in full*: the run must span the entire
+            # reference, which is the same bar ScanCode sets with per-rule coverage.
+            if longest < min(min_run, len(ref)):
                 continue
             chained = _chain(runs)
             covered = sum(size for _, _, size in chained)

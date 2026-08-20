@@ -63,8 +63,7 @@ class Cascade(AtarashiAgent):
                     yield (name, header)
         if self.use_notices:
             yield from load_notice_units(self.licenseList["shortname"],
-                                         path=self.notice_path,
-                                         min_tokens=self.min_run)
+                                         path=self.notice_path)
 
     @staticmethod
     def _comment_text(filePath, fallback):
