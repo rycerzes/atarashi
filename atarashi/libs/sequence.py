@@ -24,7 +24,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from atarashi.libs.normalize import normalize, tokens
+from atarashi.libs.normalize import normalize, token_spans, tokens
 
 
 # A match must contain at least one contiguous run of this many tokens — a
@@ -59,6 +59,8 @@ class SpanMatch:
     ref_tokens: int
     start: int  # matched span start token index in the query (inclusive)
     end: int  # matched span end token index in the query (exclusive)
+    char_start: int  # matched span start, character offset into the query text
+    char_end: int  # matched span end, character offset into the query text
 
 
 class LicenseMatcher:
@@ -198,7 +200,8 @@ class LicenseMatcher:
         it reads lower than a general-diff coverage would, and means something
         sharper: how much of the reference literally appears in the query.
         """
-        q_tokens = tokens(query)
+        spans = token_spans(query)
+        q_tokens = [tok for tok, _, _ in spans]
         if len(q_tokens) < self.shingle:
             return []
         q_ids = self._query_ids(q_tokens)
@@ -240,7 +243,8 @@ class LicenseMatcher:
             covered = sum(size for _, _, size in chained)
             start = min(sj for _, sj, _ in chained)
             end = max(sj + size for _, sj, size in chained)
-            cand = SpanMatch(name, covered / len(ref), longest, covered, len(ref), start, end)
+            cand = SpanMatch(name, covered / len(ref), longest, covered, len(ref),
+                             start, end, spans[start][1], spans[end - 1][2])
             prev = best.get(name)
             if prev is None or (cand.longest_run, cand.score) > (prev.longest_run, prev.score):
                 best[name] = cand

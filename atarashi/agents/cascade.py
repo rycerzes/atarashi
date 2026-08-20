@@ -109,9 +109,16 @@ class Cascade(AtarashiAgent):
                      if is_confident(h.score, h.longest_run,
                                      self.strong_run, self.min_coverage)]
         if confident:
+            # Offsets are into the text that was scanned — the extracted comment
+            # block when extraction succeeded, otherwise the file itself. The
+            # matched excerpt is included because that is what an auditor reads,
+            # and it stays meaningful either way.
             return [{"shortname": h.shortname, "sim_type": "SequenceCoverage",
                      "sim_score": round(h.score, 4),
-                     "description": f"matched tokens {h.start}:{h.end} "
-                                    f"(run {h.longest_run})"} for h in confident]
+                     "matched_start": h.char_start, "matched_end": h.char_end,
+                     "matched_text": text[h.char_start:h.char_end],
+                     "description": f"matched chars {h.char_start}:{h.char_end} "
+                                    f"(run {h.longest_run} tokens)"}
+                    for h in confident]
 
         return [unknown_result(round(hits[0].score, 4) if hits else 0.0)]
