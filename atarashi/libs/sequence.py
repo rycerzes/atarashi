@@ -61,6 +61,7 @@ class SpanMatch:
     end: int  # matched span end token index in the query (exclusive)
     char_start: int  # matched span start, character offset into the query text
     char_end: int  # matched span end, character offset into the query text
+    required_ok: bool = True  # every phrase the rule marks as required is present
 
 
 class LicenseMatcher:
@@ -224,7 +225,8 @@ class LicenseMatcher:
             name = self._unit_name[uid]
             if not self._has_required(name, q_joined):
                 continue
-            if self.unit_gating and not self._unit_has_required(uid, q_joined):
+            required_ok = self._unit_has_required(uid, q_joined)
+            if self.unit_gating and not required_ok:
                 continue
             ref = self._unit_ids[uid]
             runs = self._runs(self._unit_keys[uid], qpos)
@@ -244,15 +246,36 @@ class LicenseMatcher:
             start = min(sj for _, sj, _ in chained)
             end = max(sj + size for _, sj, size in chained)
             cand = SpanMatch(name, covered / len(ref), longest, covered, len(ref),
-                             start, end, spans[start][1], spans[end - 1][2])
+                             start, end, spans[start][1], spans[end - 1][2], required_ok)
             prev = best.get(name)
-            if prev is None or (cand.longest_run, cand.score) > (prev.longest_run, prev.score):
+            if prev is None or _rank(cand) > _rank(prev):
                 best[name] = cand
         # Longest contiguous run first (distinctive phrase); ties broken by coverage
         # so the reference the query most fully fills (e.g. MIT over an MIT-superset
         # like Xnet/X11) wins over a looser superset match.
-        results = sorted(best.values(), key=lambda m: (m.longest_run, m.score), reverse=True)
+        results = sorted(best.values(), key=_rank, reverse=True)
         return results[:top_k]
+
+
+def _rank(match: SpanMatch) -> tuple[int, float, bool]:
+    """Ranking key: longest run, then coverage, then required phrases satisfied.
+
+    Longest run first: a distinctive license phrase beats scattered common-word
+    overlap, and it is independent of reference length. Coverage second, so the
+    reference the query most fully fills wins over a looser superset — MIT over an
+    MIT-superset like Xnet/X11.
+
+    Coverage's preference for shorter references is load-bearing, not a defect.
+    Replacing it with "prefer the larger reference on equal evidence" — on the theory
+    that resolving toward the broader license is the safer way to be wrong — was
+    measured and is much worse: precision 0.929 → 0.775. It costs far more than the
+    narrow-variant confusions it fixes.
+
+    Required-phrase satisfaction is last: it only breaks exact ties, which were
+    previously resolved arbitrarily. As a hard filter it measured as a net loss —
+    see the note in ``LicenseMatcher.__init__``.
+    """
+    return (match.longest_run, match.score, match.required_ok)
 
 
 def _chain(runs: list[tuple[int, int, int]]) -> list[tuple[int, int, int]]:
