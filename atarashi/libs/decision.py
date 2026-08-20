@@ -11,10 +11,7 @@ SPDX-License-Identifier: GPL-2.0-only
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 UNKNOWN_SHORTNAME = "UNKNOWN"
-DEFAULT_MIN_SCORE = 0.5
 
 # Acceptance for a span match. Coverage alone is the wrong bar: a short notice
 # legitimately covers only a few percent of a multi-thousand-token license body,
@@ -44,13 +41,3 @@ def unknown_result(top_score: float = 0.0) -> dict:
         "description": "no confident license match",
     }
 
-
-def apply_abstention(results: Sequence[dict], threshold: float = DEFAULT_MIN_SCORE) -> list[dict]:
-    """Return ``results`` if the top match clears ``threshold``; else a single UNKNOWN.
-
-    An empty result set abstains. The original ranking is preserved otherwise.
-    """
-    top = max((r.get("sim_score", 0.0) for r in results), default=0.0)
-    if not results or top < threshold:
-        return [unknown_result(top)]
-    return list(results)
