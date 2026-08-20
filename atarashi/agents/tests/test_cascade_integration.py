@@ -126,3 +126,13 @@ def test_notice_layer_still_abstains_on_copyright_only(agent):
     """Coverage must not come at the cost of answering the unanswerable."""
     noise = "// Copyright (c) 2012-2013, ARM Limited. All rights reserved.\n#include <a.h>\n"
     assert _scan(agent, noise)[0]["shortname"] == "UNKNOWN"
+
+
+def test_result_carries_a_usable_character_span(agent):
+    """Token indices into a normalized stream are not something an auditor can act
+    on; the span must point into the text as written."""
+    top = _scan(agent, APACHE_NOTICE)[0]
+    assert top["matched_start"] < top["matched_end"]
+    excerpt = top["matched_text"].lower()
+    assert "apache" in excerpt
+    assert APACHE_NOTICE[top["matched_start"]:top["matched_end"]] == top["matched_text"]
