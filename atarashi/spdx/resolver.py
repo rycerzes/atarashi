@@ -15,11 +15,11 @@ from collections.abc import Iterable
 from atarashi.spdx.detector import SpdxMatch, detect
 
 
-def _index(shortnames: Iterable[str]) -> dict[str, str]:
+def shortname_index(shortnames: Iterable[str]) -> dict[str, str]:
     return {s.lower(): s for s in shortnames if isinstance(s, str)}
 
 
-def _lookup(license_id: str, index: dict[str, str]) -> str | None:
+def lookup_shortname(license_id: str, index: dict[str, str]) -> str | None:
     key = license_id.lower()
     if key in index:
         return index[key]
@@ -30,12 +30,12 @@ def _lookup(license_id: str, index: dict[str, str]) -> str | None:
 
 def resolve(matches: Iterable[SpdxMatch], shortnames: Iterable[str]) -> list[dict]:
     """Map SPDX matches to result dicts for ids present in ``shortnames``."""
-    index = _index(shortnames)
+    index = shortname_index(shortnames)
     results: list[dict] = []
     seen: set[str] = set()
     for match in matches:
         for license_id in match.licenses:
-            shortname = _lookup(license_id, index)
+            shortname = lookup_shortname(license_id, index)
             if shortname is None or shortname in seen:
                 continue
             seen.add(shortname)

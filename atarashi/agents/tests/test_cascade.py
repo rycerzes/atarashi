@@ -56,7 +56,10 @@ def test_unknown_spdx_id_abstains(tmp_path):
 
 
 def test_notice_header_matches_via_header_unit(tmp_path):
-    out = _scan(tmp_path, "# " + APACHE_HEADER + "\nimport os\n")
+    # The comment block must carry more than the bare header: on its own the header
+    # is a reference unit verbatim, so the exact-hash stage answers first and the
+    # sequence path this test exists to cover is never reached.
+    out = _scan(tmp_path, "# Copyright 2020 Acme Corp\n# " + APACHE_HEADER + "\nimport os\n")
     assert out[0]["shortname"] == "Apache-2.0"
     assert out[0]["sim_type"] == "SequenceCoverage"
 
