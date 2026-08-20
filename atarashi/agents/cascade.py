@@ -10,6 +10,7 @@ from atarashi.libs.commentPreprocessor import CommentPreprocessor
 from atarashi.libs.decision import (DEFAULT_MIN_COVERAGE, DEFAULT_STRONG_RUN,
                                     is_confident, unknown_result)
 from atarashi.libs.gate import should_scan
+from atarashi.libs.references import load_notice_units
 from atarashi.libs.sequence import DEFAULT_MIN_RUN, LicenseMatcher
 from atarashi.spdx.resolver import detect_and_resolve
 
@@ -33,16 +34,25 @@ class Cascade(AtarashiAgent):
 
     def __init__(self, licenseList, verbose=0, min_run=DEFAULT_MIN_RUN,
                  strong_run=DEFAULT_STRONG_RUN, min_coverage=DEFAULT_MIN_COVERAGE,
-                 use_gate=True):
+                 use_gate=True, use_notices=True, notice_path=None):
         super().__init__(licenseList, verbose)
         self.min_run = min_run
         self.strong_run = strong_run
         self.min_coverage = min_coverage
         self.use_gate = use_gate
+        self.use_notices = use_notices
+        self.notice_path = notice_path
         self.matcher = LicenseMatcher(self._reference_units())
 
     def _reference_units(self):
-        """Full license text plus header/notice text as separate matchable units."""
+        """Every matchable unit: full texts, headers, and the notice layer.
+
+        The notice layer is the decisive one. A license body is not what real source
+        files carry, so indexing bodies alone identifies almost no real header
+        (R@1 ~0.004 measured); the short-form rules are the register that actually
+        occurs. Set ``use_notices=False`` to index only the caller's license list —
+        tests with synthetic license lists want that isolation.
+        """
         has_header = "processed_header" in self.licenseList.columns
         for _, row in self.licenseList.iterrows():
             name = str(row["shortname"])
@@ -51,6 +61,10 @@ class Cascade(AtarashiAgent):
                 header = row["processed_header"]
                 if isinstance(header, str) and header.strip():
                     yield (name, header)
+        if self.use_notices:
+            yield from load_notice_units(self.licenseList["shortname"],
+                                         path=self.notice_path,
+                                         min_tokens=self.min_run)
 
     @staticmethod
     def _comment_text(filePath, fallback):
