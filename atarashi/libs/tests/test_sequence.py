@@ -131,3 +131,29 @@ def test_unseen_query_tokens_cannot_match():
     """Tokens absent from every reference share an id; they must never align."""
     matcher = LicenseMatcher([("MIT", "permission is hereby granted free of charge to any person")])
     assert matcher.match("zzz qqq vvv www xxx yyy", min_run=4) == []
+
+
+# --- short references ---------------------------------------------------------
+
+def test_short_reference_matches_only_when_present_in_full():
+    """"Licensed under the Apache License, Version 2.0" is seven tokens. Requiring a
+    run of `min_run` made the whole short-reference register unmatchable; such a
+    reference is admitted, but only when the query contains all of it."""
+    ref = "licensed under the apache license version 2.0"
+    matcher = LicenseMatcher([("Apache-2.0", ref)])
+    hits = matcher.match("this file is " + ref + " see license for details", min_run=8)
+    assert [h.shortname for h in hits] == ["Apache-2.0"]
+    assert hits[0].score == 1.0
+
+
+def test_partial_short_reference_is_rejected():
+    """Half a short reference is generic wording, not evidence."""
+    matcher = LicenseMatcher([("Apache-2.0", "licensed under the apache license version 2.0")])
+    assert matcher.match("licensed under the apache foundation grant terms", min_run=8) == []
+
+
+def test_long_reference_still_requires_the_full_min_run():
+    """The exemption applies only below min_run; long references are unaffected."""
+    ref = " ".join(f"clause{i} of the agreement" for i in range(20))
+    matcher = LicenseMatcher([("Long-1.0", ref)])
+    assert matcher.match("clause3 of the agreement", min_run=8) == []
