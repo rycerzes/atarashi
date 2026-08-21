@@ -51,6 +51,7 @@ def family(shortname: str) -> str:
 FEATURE_NAMES = [
     "longest_run", "log_ref_tokens", "ref_coverage", "query_coverage",
     "matched_tokens", "shingle_ratio", "run_count",
+    "best_unit_coverage", "units_matched",
     "ref_gap", "query_gap", "ref_head", "ref_tail", "substitution",
     "required_ok", "run_margin", "cov_margin",
 ]
@@ -84,6 +85,8 @@ def featurize(matches, normalize: bool = True) -> list[list[float]]:
         float(m.matched_tokens),
         float(m.shingle_ratio),
         float(m.run_count),
+        float(m.best_unit_coverage),
+        float(m.units_matched),
         float(m.ref_gap),
         float(m.query_gap),
         float(m.ref_head),
