@@ -22,7 +22,7 @@ SPDX-License-Identifier: GPL-2.0-only
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from atarashi.libs.normalize import normalize, token_spans, tokens
 
@@ -66,6 +66,14 @@ class SpanMatch:
     # Signals below are computed on the way to the fields above and were previously
     # discarded. They are what separates close variants: two candidates can tie on
     # run and coverage while disagreeing completely on *how* they failed to match.
+    # Evidence from the license's OTHER units, which selecting one winner discards.
+    # A license whose best-covered unit the query fills completely is better
+    # supported than one covering 70% of a shorter unit, even when the retained
+    # unit's longest run is a token shorter — that is exactly how
+    # mpl-2.0-no-copyleft-exception was beating MPL-2.0.
+    best_unit_coverage: float = 0.0  # highest coverage any unit of this license reached
+    units_matched: int = 1  # how many of its units matched at all
+
     run_count: int = 1  # matched runs after chaining; 1 = one clean block
     ref_gap: int = 0  # reference tokens between runs that the query does not have
     query_gap: int = 0  # query tokens between runs that the reference does not have
@@ -243,6 +251,7 @@ class LicenseMatcher:
         candidates = sorted(counts, key=counts.get, reverse=True)[:self.max_candidates]
 
         best: dict[str, SpanMatch] = {}
+        corroboration: dict[str, tuple[float, int]] = {}
         for uid in candidates:
             name = self._unit_name[uid]
             if not self._has_required(name, q_joined):
@@ -275,13 +284,18 @@ class LicenseMatcher:
                 ref_head=gaps[2], ref_tail=gaps[3],
                 shingle_ratio=counts[uid] / max(len(set(self._unit_keys[uid])), 1),
                 query_coverage=covered / len(q_tokens))
+            corroboration[name] = (max(corroboration.get(name, (0.0, 0))[0], cand.score),
+                                   corroboration.get(name, (0.0, 0))[1] + 1)
             prev = best.get(name)
             if prev is None or _rank(cand) > _rank(prev):
                 best[name] = cand
         # Longest contiguous run first (distinctive phrase); ties broken by coverage
         # so the reference the query most fully fills (e.g. MIT over an MIT-superset
         # like Xnet/X11) wins over a looser superset match.
-        results = sorted(best.values(), key=_rank, reverse=True)
+        merged = [replace(m, best_unit_coverage=corroboration[name][0],
+                          units_matched=corroboration[name][1])
+                  for name, m in best.items()]
+        results = sorted(merged, key=_rank, reverse=True)
         return results[:top_k]
 
 
