@@ -223,3 +223,37 @@ def test_a_true_tie_is_still_reported():
 
 def test_empty_input_is_handled():
     assert tied_with_leader([]) == []
+
+
+# --- ranker family gate -------------------------------------------------------
+
+def test_ranker_declines_outside_its_trained_families():
+    """Held-out families are actively harmed (-0.051, GPL alone -0.134), so the model
+    must not act on a license family it never trained on."""
+    from atarashi.libs.ranker import rerank
+
+    class Boom:
+        def predict_proba(self, _):
+            raise AssertionError("model must not be consulted for an unseen family")
+
+    hits = LicenseMatcher([("NCSA", "permission is hereby granted free of charge to any"),
+                           ("MIT", "permission is hereby granted free of charge to any person")]
+                          ).match("permission is hereby granted free of charge to any", min_run=8)
+    bundle = {"model": Boom(), "scaler": None, "families": ["MIT", "GPL"]}
+    assert rerank(hits, bundle) is hits
+
+
+def test_ranker_declines_on_the_unrecognised_family_bucket():
+    """OTHER is a bucket for unrecognised names; it cannot vouch for coverage."""
+    from atarashi.libs.ranker import family, rerank
+
+    class Boom:
+        def predict_proba(self, _):
+            raise AssertionError("model must not be consulted for OTHER")
+
+    hits = LicenseMatcher([("Weird-Vendor-EULA", "permission is hereby granted free of charge"),
+                           ("MIT", "permission is hereby granted free of charge to any person")]
+                          ).match("permission is hereby granted free of charge", min_run=8)
+    assert family(hits[0].shortname) == "OTHER"
+    assert rerank(hits, {"model": Boom(), "scaler": None,
+                         "families": ["OTHER", "MIT"]}) is hits

@@ -12,10 +12,17 @@ demonstrably unsafe here: on high-overlap/different-meaning pairs they score und
 and below chance when overlap disagrees with the label, which is exactly the
 GPL-2-vs-GPL-3 case.
 
-Scope, measured: this helps for licenses the model has training data for and does
-nothing for ones it has not seen (leave-one-family-out is -0.012). It is therefore
-optional and **off unless an artifact is present**, and the engine falls back to the
-hand-tuned key whenever the artifact is missing or unreadable.
+Scope is measured and narrow, and the model is gated to it. Held-out families are not
+merely unhelped, they are actively harmed: leave-one-license-family-out is **-0.051**,
+and holding out GPL costs -0.134. That got *worse* as training licenses grew from 18
+to 34 — more families give the model more per-family signatures to memorise rather
+than a general rule, so widening the corpus does not fix it and the measurement says
+so directly.
+
+The model therefore declines to act outside its training distribution: if the leading
+candidate's license family was not in training, the hand-tuned ordering stands. That
+converts a -0.051 regression on unseen families into no change, while keeping the
+gain where it is validated. It is also off entirely unless an artifact is present.
 
 ``featurize`` is imported by the training code so the two cannot drift; a mismatch
 between training and inference features would be silent and would poison the scores.
@@ -25,9 +32,20 @@ SPDX-License-Identifier: GPL-2.0-only
 from __future__ import annotations
 
 import math
+import re
 from pathlib import Path
 
 DEFAULT_RANKER = Path(__file__).resolve().parents[1] / "data" / "ranker.joblib"
+
+_FAMILY = re.compile(r"^(a?l?gpl|mpl|epl|bsd|apache|mit|cc|isc|artistic|zlib|ofl"
+                     r"|wtfpl|edl|ecl|cddl|python|boost|bsl|osl|ms|eupl|upl|ncsa"
+                     r"|openssl|postgresql|unlicense|w3c|x11|zpl)", re.I)
+
+
+def family(shortname: str) -> str:
+    """Coarse license family — the unit at which this model generalises, or not."""
+    found = _FAMILY.match(shortname or "")
+    return found.group(1).upper() if found else "OTHER"
 
 # Fixed order — the model's columns are positional.
 FEATURE_NAMES = [
@@ -104,11 +122,23 @@ def load_ranker(path: Path | None = None):
 def rerank(matches, bundle):
     """Re-order ``matches`` by learned score, most likely first.
 
+    Declines on any license family absent from training — see the module docstring;
+    outside its training distribution this model is worse than the ordering it
+    replaces, so silence is the correct behaviour rather than a missed opportunity.
+
     Returns the input untouched on any failure. A ranking model that raises must not
     take the scan down with it — the hand-tuned order is a working fallback.
     """
     if not bundle or len(matches) < 2:
         return matches
+    known = bundle.get("families")
+    if known:
+        leader = family(matches[0].shortname)
+        # "OTHER" is the bucket for names the family rule does not recognise, not a
+        # family. Its presence in training says nothing about whether *this* license
+        # was covered, so it cannot license a decision.
+        if leader == "OTHER" or leader not in known:
+            return matches
     try:
         rows = featurize(matches)
         scores = bundle["model"].predict_proba(bundle["scaler"].transform(rows))[:, 1]
