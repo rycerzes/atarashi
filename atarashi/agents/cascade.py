@@ -10,7 +10,8 @@ from atarashi.libs.commentPreprocessor import CommentPreprocessor
 from atarashi.libs.decision import (DEFAULT_MIN_COVERAGE, DEFAULT_STRONG_RUN,
                                     is_confident, unknown_result)
 from atarashi.libs.gate import should_scan
-from atarashi.libs.ranker import accept, load_ranker, rerank
+from atarashi.libs.ranker import (DEFAULT_ACCEPT, DEFAULT_AMBIGUOUS_MARGIN,
+                                  load_ranker, score_candidates)
 from atarashi.libs.references import load_notice_units
 from atarashi.libs.sequence import DEFAULT_MIN_RUN, LicenseMatcher, tied_with_leader
 from atarashi.spdx.resolver import detect_and_resolve
@@ -114,11 +115,18 @@ class Cascade(AtarashiAgent):
         # whose *other* units the query covered completely. Where the model has no
         # opinion — no artifact, or a license family it never trained on — the
         # hand-tuned rule still decides.
-        verdict = accept(hits, self.ranker) if self.ranker else None
-        if verdict is False:
-            return [unknown_result(round(hits[0].score, 4) if hits else 0.0)]
-        if verdict is True:
-            confident = tied_with_leader(rerank(hits, self.ranker))
+        scored = score_candidates(hits, self.ranker) if self.ranker else None
+        ambiguous = ()
+        if scored is not None:
+            ranked, scores = scored
+            tau = self.ranker.get("accept", DEFAULT_ACCEPT)
+            if not scores or scores[0] < tau:
+                return [unknown_result(round(scores[0], 4) if scores else 0.0,
+                                       list(zip((h.shortname for h in ranked), scores)))]
+            confident = tied_with_leader(ranked)
+            # Two candidates the model cannot separate are an ambiguity, not a pick.
+            if len(scores) > 1 and scores[0] - scores[1] < DEFAULT_AMBIGUOUS_MARGIN:
+                ambiguous = tuple(h.shortname for h in ranked[:2])
         else:
             confident = tied_with_leader(
                 [h for h in hits
@@ -128,12 +136,16 @@ class Cascade(AtarashiAgent):
             # block when extraction succeeded, otherwise the file itself. The
             # matched excerpt is included because that is what an auditor reads,
             # and it stays meaningful either way.
-            return [{"shortname": h.shortname, "sim_type": "SequenceCoverage",
+            rival = next((n for n in ambiguous if n != confident[0].shortname), None)
+            note = (f"; ambiguous with {rival} — the evidence does not separate them"
+                    if rival else "")
+            return [{"shortname": h.shortname,
+                     "sim_type": "Ambiguous" if ambiguous else "SequenceCoverage",
                      "sim_score": round(h.score, 4),
                      "matched_start": h.char_start, "matched_end": h.char_end,
                      "matched_text": text[h.char_start:h.char_end],
                      "description": f"matched chars {h.char_start}:{h.char_end} "
-                                    f"(run {h.longest_run} tokens)"}
+                                    f"(run {h.longest_run} tokens){note}"}
                     for h in confident]
 
         return [unknown_result(round(hits[0].score, 4) if hits else 0.0)]
