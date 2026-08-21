@@ -46,6 +46,14 @@ DEFAULT_RANKER = Path(__file__).resolve().parents[1] / "data" / "ranker.joblib"
 # and R@1 on the DEP-5 corpus while cutting false answers on no-signal by 59%.
 DEFAULT_ACCEPT = 0.30
 
+# Report an ambiguity rather than a pick when the leader beats the runner-up by less
+# than this. Measured on 619 answered DEP-5 queries: no correct answer was ever
+# decided by a margin below 0.195, while eight wrong ones fall under 0.1. Flagging
+# there costs nothing and stops the engine choosing silently between two variants it
+# cannot actually separate — which for GPL-2.0-only against GPL-2.0-or-later is a
+# difference in what the licence permits.
+DEFAULT_AMBIGUOUS_MARGIN = 0.10
+
 _FAMILY = re.compile(r"^(a?l?gpl|mpl|epl|bsd|apache|mit|cc|isc|artistic|zlib|ofl"
                      r"|wtfpl|edl|ecl|cddl|python|boost|bsl|osl|ms|eupl|upl|ncsa"
                      r"|openssl|postgresql|unlicense|w3c|x11|zpl)", re.I)
@@ -170,6 +178,27 @@ def accept(matches, bundle, threshold: float | None = None) -> bool | None:
     except Exception:
         return None
     return bool(max(scores) >= tau)
+
+
+def score_candidates(matches, bundle):
+    """``(ordered matches, their scores)``, or None when the model has no opinion.
+
+    One entry point, because acceptance, ordering and the ambiguity margin all read
+    the same scores and computing them three times invites them to disagree.
+    """
+    if not bundle or not matches:
+        return None
+    known = bundle.get("families")
+    if known and (family(matches[0].shortname) == "OTHER"
+                  or family(matches[0].shortname) not in known):
+        return None
+    try:
+        rows = featurize(matches)
+        scores = bundle["model"].predict_proba(bundle["scaler"].transform(rows))[:, 1]
+    except Exception:
+        return None
+    order = sorted(range(len(matches)), key=lambda i: -scores[i])
+    return [matches[i] for i in order], [float(scores[i]) for i in order]
 
 
 def rerank(matches, bundle):
