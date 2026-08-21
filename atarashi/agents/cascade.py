@@ -11,7 +11,7 @@ from atarashi.libs.decision import (DEFAULT_MIN_COVERAGE, DEFAULT_STRONG_RUN,
                                     is_confident, unknown_result)
 from atarashi.libs.gate import should_scan
 from atarashi.libs.references import load_notice_units
-from atarashi.libs.sequence import DEFAULT_MIN_RUN, LicenseMatcher
+from atarashi.libs.sequence import DEFAULT_MIN_RUN, LicenseMatcher, tied_with_leader
 from atarashi.spdx.resolver import detect_and_resolve
 
 
@@ -105,9 +105,9 @@ class Cascade(AtarashiAgent):
                      "sim_score": 1.0, "description": ""}]
 
         hits = self.matcher.match(text, min_run=self.min_run)
-        confident = [h for h in hits
-                     if is_confident(h.score, h.longest_run,
-                                     self.strong_run, self.min_coverage)]
+        confident = tied_with_leader(
+            [h for h in hits
+             if is_confident(h.score, h.longest_run, self.strong_run, self.min_coverage)])
         if confident:
             # Offsets are into the text that was scanned — the extracted comment
             # block when extraction succeeded, otherwise the file itself. The
