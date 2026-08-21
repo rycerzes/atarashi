@@ -10,6 +10,7 @@ from atarashi.libs.commentPreprocessor import CommentPreprocessor
 from atarashi.libs.decision import (DEFAULT_MIN_COVERAGE, DEFAULT_STRONG_RUN,
                                     is_confident, unknown_result)
 from atarashi.libs.gate import should_scan
+from atarashi.libs.ranker import load_ranker, rerank
 from atarashi.libs.references import load_notice_units
 from atarashi.libs.sequence import DEFAULT_MIN_RUN, LicenseMatcher, tied_with_leader
 from atarashi.spdx.resolver import detect_and_resolve
@@ -34,7 +35,8 @@ class Cascade(AtarashiAgent):
 
     def __init__(self, licenseList, verbose=0, min_run=DEFAULT_MIN_RUN,
                  strong_run=DEFAULT_STRONG_RUN, min_coverage=DEFAULT_MIN_COVERAGE,
-                 use_gate=True, use_notices=True, notice_path=None):
+                 use_gate=True, use_notices=True, notice_path=None,
+                 use_ranker=True, ranker_path=None):
         super().__init__(licenseList, verbose)
         self.min_run = min_run
         self.strong_run = strong_run
@@ -42,6 +44,8 @@ class Cascade(AtarashiAgent):
         self.use_gate = use_gate
         self.use_notices = use_notices
         self.notice_path = notice_path
+        # Absent artifact => None => the hand-tuned ordering stands.
+        self.ranker = load_ranker(ranker_path) if use_ranker else None
         self.matcher = LicenseMatcher(self._reference_units())
 
     def _reference_units(self):
@@ -105,6 +109,8 @@ class Cascade(AtarashiAgent):
                      "sim_score": 1.0, "description": ""}]
 
         hits = self.matcher.match(text, min_run=self.min_run)
+        if self.ranker:
+            hits = rerank(hits, self.ranker)
         confident = tied_with_leader(
             [h for h in hits
              if is_confident(h.score, h.longest_run, self.strong_run, self.min_coverage)])
