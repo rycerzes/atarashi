@@ -33,11 +33,28 @@ def shortname_index(shortnames: Iterable[str]) -> dict[str, str]:
 
 
 def lookup_shortname(license_id: str, index: dict[str, str]) -> str | None:
+    """Resolve an SPDX id against a license list, bridging the GPL renaming.
+
+    SPDX 3.0 split `GPL-2.0` into `GPL-2.0-only` and `GPL-2.0-or-later`. FOSSology's
+    list predates that and writes `GPL-2.0` and `GPL-2.0+`. Without the bridge the
+    two vocabularies never meet: the notice index keys on SPDX ids, so every GPL,
+    LGPL and AGPL rule — about 3,700 of them — resolved to nothing and was dropped,
+    leaving the GPL family matchable only against its own multi-thousand-token body.
+    """
     key = license_id.lower()
     if key in index:
         return index[key]
     if key.endswith("+") and key[:-1] in index:  # `GPL-2.0+` -> `GPL-2.0`
         return index[key[:-1]]
+    if key.endswith("-or-later"):
+        stem = key[: -len("-or-later")]
+        for candidate in (stem + "+", stem):     # prefer the or-later spelling
+            if candidate in index:
+                return index[candidate]
+    if key.endswith("-only"):
+        stem = key[: -len("-only")]
+        if stem in index:
+            return index[stem]
     return None
 
 

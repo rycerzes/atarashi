@@ -98,3 +98,29 @@ def test_same_license_under_two_expressions_is_two_results():
     out = detect_and_resolve(text, SHORTNAMES)
     assert [d["expression"] for d in out] == [
         "GPL-2.0", "GPL-2.0 WITH Classpath-exception-2.0"]
+
+
+# --- SPDX 3.0 renaming of the GPL family --------------------------------------
+# The notice index keys on SPDX ids while FOSSology's list predates the split, so
+# without this bridge every GPL/LGPL/AGPL rule resolves to nothing and is dropped.
+
+GPL_NAMES = ["GPL-2.0", "GPL-2.0+", "GPL-3.0", "GPL-3.0+", "MIT"]
+
+
+def test_or_later_spdx_id_resolves_to_the_plus_shortname():
+    assert resolve(detect("SPDX-License-Identifier: GPL-2.0-or-later"),
+                   GPL_NAMES)[0]["shortname"] == "GPL-2.0+"
+
+
+def test_only_spdx_id_resolves_to_the_bare_shortname():
+    assert resolve(detect("SPDX-License-Identifier: GPL-2.0-only"),
+                   GPL_NAMES)[0]["shortname"] == "GPL-2.0"
+
+
+def test_or_later_falls_back_when_no_plus_spelling_exists():
+    assert resolve(detect("SPDX-License-Identifier: GPL-3.0-or-later"),
+                   ["GPL-3.0", "MIT"])[0]["shortname"] == "GPL-3.0"
+
+
+def test_bridge_does_not_invent_licenses():
+    assert resolve(detect("SPDX-License-Identifier: AGPL-9.9-or-later"), GPL_NAMES) == []
