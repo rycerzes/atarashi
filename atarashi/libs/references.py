@@ -26,19 +26,28 @@ from atarashi.spdx.resolver import lookup_shortname, shortname_index
 
 DEFAULT_INDEX = Path(__file__).resolve().parents[1] / "data" / "licenses" / "notice_rules.json"
 
-# Shortest reference unit worth indexing. Measured, not assumed — sweeping the floor
-# over the 246-query notice regime and the 2,145-query no-signal regime:
+# Shortest reference unit worth indexing. Swept three times; the answer is 5 each
+# time, but for different reasons, so both are recorded.
 #
-#   floor  coverage  precision   R@1    no-signal false answers
-#     4      65.9%     0.8765   0.5772        1.96%
-#     5      65.9%     0.8765   0.5772        1.96%
-#     6      62.2%     0.8693   0.5407        1.68%
-#     7      60.6%     0.8725   0.5285        1.35%
-#     8      59.8%     0.8707   0.5203        1.31%
+# Under the hand-tuned confidence bar, floor 3 cost SPDX-tag precision outright
+# (0.9667 -> 0.9585): that bar could not separate a real short declaration from a code
+# string, and both are three tokens.
 #
-# 5 dominates 4: identical on every measure while dropping ~700 dead units, so no
-# four-token rule earns its place. Below 8 the trade is roughly three extra correct
-# answers per extra false one, weighted by how often each regime occurs in real code.
+# Re-swept with the learned reject option, which sees run length, coverage,
+# corroboration and margin, floor 3 looked strictly better *in-sample* — clearing
+# ScanCode on all four measures. Held out it does not:
+#
+#              DEP-5 prec/R@1     SPDX-tag prec/R@1
+#   floor 3    0.8771 / 0.8405    0.9609 / 0.9248
+#   floor 5    0.8831 / 0.8331    0.9651 / 0.9361
+#
+# Floor 5 wins on three of four, and floor 3 is behind ScanCode on both SPDX-tag
+# measures. The in-sample sweep flattered it because the artifact had been fit on the
+# queries it was scored against.
+#
+# So the short declarations that motivated the change — "licensed under MIT,",
+# "License : Apache-2.0" at three tokens — stay unreachable. They are 17 DEP-5 queries,
+# and buying them costs more elsewhere than they are worth.
 MIN_UNIT_TOKENS = 5
 
 
