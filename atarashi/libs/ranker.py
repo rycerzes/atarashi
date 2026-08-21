@@ -37,6 +37,15 @@ from pathlib import Path
 
 DEFAULT_RANKER = Path(__file__).resolve().parents[1] / "data" / "ranker.joblib"
 
+# Accept the top candidate when the model's probability for it clears this. A learned
+# reject option (Chow's rule) rather than another hand-set bar: the shipped
+# `is_confident` sees only the retained unit's run and coverage, so it abstained on
+# queries where a *different* unit of the same license was covered completely —
+# `best_unit_coverage` 1.000 with the retained unit at 0.25. Chosen from a held-out
+# risk-coverage curve, where it is the point that clears ScanCode on both precision
+# and R@1 on the DEP-5 corpus while cutting false answers on no-signal by 59%.
+DEFAULT_ACCEPT = 0.30
+
 _FAMILY = re.compile(r"^(a?l?gpl|mpl|epl|bsd|apache|mit|cc|isc|artistic|zlib|ofl"
                      r"|wtfpl|edl|ecl|cddl|python|boost|bsl|osl|ms|eupl|upl|ncsa"
                      r"|openssl|postgresql|unlicense|w3c|x11|zpl)", re.I)
@@ -137,6 +146,30 @@ def load_ranker(path: Path | None = None):
             bundle = None
     _CACHE[key] = bundle
     return bundle
+
+
+def accept(matches, bundle, threshold: float | None = None) -> bool | None:
+    """Whether the leading candidate is worth reporting.
+
+    Three outcomes, and the third is the important one. ``None`` means the model has
+    no opinion — no artifact, an unseen license family, or a scoring failure — and the
+    caller must fall back to its own confidence rule. Collapsing that into ``True``
+    would turn "I cannot judge this" into "report it", which is exactly backwards for
+    a family the model was never trained on.
+    """
+    if not bundle or not matches:
+        return None
+    known = bundle.get("families")
+    if known and (family(matches[0].shortname) == "OTHER"
+                  or family(matches[0].shortname) not in known):
+        return None
+    tau = bundle.get("accept", DEFAULT_ACCEPT) if threshold is None else threshold
+    try:
+        rows = featurize(matches)
+        scores = bundle["model"].predict_proba(bundle["scaler"].transform(rows))[:, 1]
+    except Exception:
+        return None
+    return bool(max(scores) >= tau)
 
 
 def rerank(matches, bundle):

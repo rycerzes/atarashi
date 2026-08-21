@@ -110,9 +110,14 @@ def test_notice_layer_identifies_a_short_reference(agent):
 
 
 def test_short_reference_abstains_without_the_notice_layer(agent):
-    """Pins the layer as the cause of the previous test, not the full-text index."""
+    """Pins the notice layer as the cause of the previous test, not the full-text index.
+
+    The ranker is held off deliberately: it now accepts this query from the full-text
+    layer alone — correctly, since Apache-2.0 is the right answer — which would mask
+    the very thing this test isolates.
+    """
     _, df = agent
-    bare = Cascade(df, use_notices=False, use_gate=False)
+    bare = Cascade(df, use_notices=False, use_gate=False, use_ranker=False)
     fd, path = tempfile.mkstemp(suffix=".c")
     os.write(fd, APACHE_REFERENCE.encode())
     os.close(fd)
@@ -136,3 +141,19 @@ def test_result_carries_a_usable_character_span(agent):
     excerpt = top["matched_text"].lower()
     assert "apache" in excerpt
     assert APACHE_NOTICE[top["matched_start"]:top["matched_end"]] == top["matched_text"]
+
+
+def test_learned_accept_recovers_a_short_reference_the_bar_rejects(agent):
+    """The learned reject option's reason for existing: `is_confident` reads only the
+    retained unit's run and coverage, so it abstained on queries where another unit of
+    the same license was covered in full."""
+    _, df = agent
+    without = Cascade(df, use_gate=False, use_ranker=False)
+    fd, path = tempfile.mkstemp(suffix=".c")
+    os.write(fd, APACHE_REFERENCE.encode())
+    os.close(fd)
+    try:
+        assert _scan(agent, APACHE_REFERENCE)[0]["shortname"] == "Apache-2.0"
+        assert without.scan(path)[0]["shortname"] == "Apache-2.0"
+    finally:
+        os.remove(path)

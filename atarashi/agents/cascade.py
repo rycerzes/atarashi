@@ -10,7 +10,7 @@ from atarashi.libs.commentPreprocessor import CommentPreprocessor
 from atarashi.libs.decision import (DEFAULT_MIN_COVERAGE, DEFAULT_STRONG_RUN,
                                     is_confident, unknown_result)
 from atarashi.libs.gate import should_scan
-from atarashi.libs.ranker import load_ranker, rerank
+from atarashi.libs.ranker import accept, load_ranker, rerank
 from atarashi.libs.references import load_notice_units
 from atarashi.libs.sequence import DEFAULT_MIN_RUN, LicenseMatcher, tied_with_leader
 from atarashi.spdx.resolver import detect_and_resolve
@@ -109,11 +109,20 @@ class Cascade(AtarashiAgent):
                      "sim_score": 1.0, "description": ""}]
 
         hits = self.matcher.match(text, min_run=self.min_run)
-        if self.ranker:
-            hits = rerank(hits, self.ranker)
-        confident = tied_with_leader(
-            [h for h in hits
-             if is_confident(h.score, h.longest_run, self.strong_run, self.min_coverage)])
+        # The learned reject option replaces the run/coverage bar rather than stacking
+        # on it: that bar reads only the retained unit, so it abstained on licenses
+        # whose *other* units the query covered completely. Where the model has no
+        # opinion — no artifact, or a license family it never trained on — the
+        # hand-tuned rule still decides.
+        verdict = accept(hits, self.ranker) if self.ranker else None
+        if verdict is False:
+            return [unknown_result(round(hits[0].score, 4) if hits else 0.0)]
+        if verdict is True:
+            confident = tied_with_leader(rerank(hits, self.ranker))
+        else:
+            confident = tied_with_leader(
+                [h for h in hits
+                 if is_confident(h.score, h.longest_run, self.strong_run, self.min_coverage)])
         if confident:
             # Offsets are into the text that was scanned — the extracted comment
             # block when extraction succeeded, otherwise the file itself. The
