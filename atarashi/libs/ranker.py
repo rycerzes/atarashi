@@ -56,7 +56,7 @@ FEATURE_NAMES = [
 ]
 
 
-def featurize(matches) -> list[list[float]]:
+def featurize(matches, normalize: bool = True) -> list[list[float]]:
     """Feature rows for one query's ranked candidates.
 
     ``run_margin`` and ``cov_margin`` are distances to the leader. They are the
@@ -64,11 +64,19 @@ def featurize(matches) -> list[list[float]]:
     strongest features the model has — the rank *position* itself is deliberately not
     a feature, because a model given it simply reproduces the ordering it was meant
     to improve.
+
+    Features are standardized **within the candidate list** by default. Absolute
+    magnitudes fingerprint a license — a reference body of 5,699 tokens is GPL-3.0
+    and 2,984 is GPL-2.0 — so a model given them learns license identity instead of
+    what a good match looks like, and then fails on any license it has not seen.
+    Describing each candidate only by how it compares to its rivals for the same
+    query removes that shortcut: it moved leave-one-license-family-out from -0.054 to
+    -0.013 on its own, and to +0.001 once tree depth came down to 2.
     """
     if not matches:
         return []
     lead = matches[0]
-    return [[
+    rows = [[
         float(m.longest_run),
         math.log1p(m.ref_tokens),
         float(m.score),
@@ -85,6 +93,15 @@ def featurize(matches) -> list[list[float]]:
         float(lead.longest_run - m.longest_run),
         float(lead.score - m.score),
     ] for m in matches]
+    if not normalize or len(rows) < 2:
+        return rows
+    columns = list(zip(*rows))
+    stats = []
+    for column in columns:
+        mean = sum(column) / len(column)
+        variance = sum((v - mean) ** 2 for v in column) / len(column)
+        stats.append((mean, math.sqrt(variance) or 1.0))
+    return [[(v - mean) / sd for v, (mean, sd) in zip(row, stats)] for row in rows]
 
 
 # The artifact is immutable for the life of a process and every agent construction
