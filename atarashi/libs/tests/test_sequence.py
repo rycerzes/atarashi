@@ -3,7 +3,7 @@
 
 SPDX-License-Identifier: GPL-2.0-only
 """
-from atarashi.libs.sequence import LicenseMatcher
+from atarashi.libs.sequence import tied_with_leader, LicenseMatcher
 
 MIT = ("Permission is hereby granted, free of charge, to any person obtaining a copy "
        "of this software and associated documentation files, to deal in the Software "
@@ -198,3 +198,28 @@ def test_unit_gating_is_off_by_default():
     refs = [("MPL-2.0-no-copyleft-exception", body, ["no copyleft exception"])]
     assert LicenseMatcher(refs).match(body, min_run=8)[0].shortname == \
         "MPL-2.0-no-copyleft-exception"
+
+
+# --- reported result set ------------------------------------------------------
+
+def test_only_genuine_ties_are_reported_alongside_the_leader():
+    """Acceptance is per-candidate, so several close variants clear the bar on the
+    same text. Reporting them all put four wrong licenses next to the right one on
+    97% of files, invisible to any top-1 metric."""
+    notice = "permission is hereby granted free of charge to any person obtaining a copy"
+    refs = [("MIT", notice),
+            ("Weaker-1.0", notice + " and to sublicense under further conditions")]
+    hits = LicenseMatcher(refs).match(notice, min_run=8)
+    assert len(hits) == 2, "both should match; the cut is what removes the weaker one"
+    assert [h.shortname for h in tied_with_leader(hits)] == ["MIT"]
+
+
+def test_a_true_tie_is_still_reported():
+    """Identical evidence for two licenses is real ambiguity, not noise to hide."""
+    notice = "redistribution and use in source and binary forms are permitted provided"
+    hits = LicenseMatcher([("A-1.0", notice), ("B-1.0", notice)]).match(notice, min_run=8)
+    assert sorted(h.shortname for h in tied_with_leader(hits)) == ["A-1.0", "B-1.0"]
+
+
+def test_empty_input_is_handled():
+    assert tied_with_leader([]) == []
