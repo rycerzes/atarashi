@@ -63,6 +63,28 @@ class SpanMatch:
     char_end: int  # matched span end, character offset into the query text
     required_ok: bool = True  # every phrase the rule marks as required is present
 
+    # Signals below are computed on the way to the fields above and were previously
+    # discarded. They are what separates close variants: two candidates can tie on
+    # run and coverage while disagreeing completely on *how* they failed to match.
+    run_count: int = 1  # matched runs after chaining; 1 = one clean block
+    ref_gap: int = 0  # reference tokens between runs that the query does not have
+    query_gap: int = 0  # query tokens between runs that the reference does not have
+    ref_head: int = 0  # reference tokens before the first run
+    ref_tail: int = 0  # reference tokens after the last run
+    shingle_ratio: float = 0.0  # shared shingles / this unit's distinct shingles
+    query_coverage: float = 0.0  # matched tokens / query length
+
+    @property
+    def substitution(self) -> int:
+        """Tokens where query and reference both have text, and it differs.
+
+        A pure deletion (`ref_gap` with no `query_gap`) means the reference says
+        something the query never does — an or-later clause the file omits. A pure
+        insertion is the reverse. Both differing at once is a substitution, which is
+        what a changed version digit looks like.
+        """
+        return min(self.ref_gap, self.query_gap)
+
 
 class LicenseMatcher:
     """Match input text against a fixed set of reference license texts."""
@@ -245,8 +267,14 @@ class LicenseMatcher:
             covered = sum(size for _, _, size in chained)
             start = min(sj for _, sj, _ in chained)
             end = max(sj + size for _, sj, size in chained)
-            cand = SpanMatch(name, covered / len(ref), longest, covered, len(ref),
-                             start, end, spans[start][1], spans[end - 1][2], required_ok)
+            gaps = _gaps(chained, len(ref))
+            cand = SpanMatch(
+                name, covered / len(ref), longest, covered, len(ref),
+                start, end, spans[start][1], spans[end - 1][2], required_ok,
+                run_count=len(chained), ref_gap=gaps[0], query_gap=gaps[1],
+                ref_head=gaps[2], ref_tail=gaps[3],
+                shingle_ratio=counts[uid] / max(len(set(self._unit_keys[uid])), 1),
+                query_coverage=covered / len(q_tokens))
             prev = best.get(name)
             if prev is None or _rank(cand) > _rank(prev):
                 best[name] = cand
@@ -276,6 +304,24 @@ def _rank(match: SpanMatch) -> tuple[int, float, bool]:
     see the note in ``LicenseMatcher.__init__``.
     """
     return (match.longest_run, match.score, match.required_ok)
+
+
+def _gaps(chained: list[tuple[int, int, int]], ref_len: int) -> tuple[int, int, int, int]:
+    """(ref_gap, query_gap, ref_head, ref_tail) over the chained runs.
+
+    Walked in reference order. Between consecutive runs, the reference may skip
+    tokens the query does not supply and the query may carry tokens the reference
+    does not — the two are different facts and the pair of them is where a variant
+    clause lives, so they are counted separately rather than as one edit distance.
+    """
+    ordered = sorted(chained)  # by reference start
+    ref_gap = query_gap = 0
+    for (ri, qi, size), (rj, qj, _) in zip(ordered, ordered[1:]):
+        ref_gap += max(0, rj - (ri + size))
+        query_gap += max(0, qj - (qi + size))
+    head = ordered[0][0]
+    tail = ref_len - (ordered[-1][0] + ordered[-1][2])
+    return ref_gap, query_gap, head, max(0, tail)
 
 
 def tied_with_leader(matches: list[SpanMatch]) -> list[SpanMatch]:
