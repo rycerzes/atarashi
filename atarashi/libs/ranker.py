@@ -37,13 +37,24 @@ from pathlib import Path
 
 DEFAULT_RANKER = Path(__file__).resolve().parents[1] / "data" / "ranker.joblib"
 
-# Accept the top candidate when the model's probability for it clears this. A learned
-# reject option (Chow's rule) rather than another hand-set bar: the shipped
-# `is_confident` sees only the retained unit's run and coverage, so it abstained on
-# queries where a *different* unit of the same license was covered completely —
-# `best_unit_coverage` 1.000 with the retained unit at 0.25. Chosen from a held-out
-# risk-coverage curve, where it is the point that clears ScanCode on both precision
-# and R@1 on the DEP-5 corpus while cutting false answers on no-signal by 59%.
+# Accept the top candidate when the model's probability for it clears this. The
+# shipped artifact carries a threshold derived by split-conformal calibration rather
+# than this constant, which is only the fallback when none is recorded.
+#
+# The conformal derivation: nonconformity for a candidate is 1 - P(correct); calibrate
+# on held-out queries whose correct licence is among the candidates; take the
+# ceil((n+1)(1-alpha))/n empirical quantile. At alpha=0.10 over n=432 that gives an
+# accept floor of 0.3013, with realised coverage 0.931 and a mean set size of 0.99.
+#
+# Two limits worth stating wherever the guarantee is quoted. It is **conditional on
+# the correct licence being retrievable at all** — 864 of 1,002 queries — because
+# calibration can only use queries whose candidate list contains the truth; for the
+# rest no threshold helps. And it is **marginal, not per-licence**: class-conditional
+# coverage needs on the order of 100 calibration points per class against the ~27
+# available here.
+#
+# That the tuned value and the derived one agree to three decimals (0.30 against
+# 0.3013) is reassurance, not evidence — the grid search optimised on the same data.
 DEFAULT_ACCEPT = 0.30
 
 # Report an ambiguity rather than a pick when the leader beats the runner-up by less
