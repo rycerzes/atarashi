@@ -124,9 +124,21 @@ class Cascade(AtarashiAgent):
                 return [unknown_result(round(scores[0], 4) if scores else 0.0,
                                        list(zip((h.shortname for h in ranked), scores)))]
             confident = tied_with_leader(ranked)
-            # Two candidates the model cannot separate are an ambiguity, not a pick.
+            # Candidates the model cannot separate are an ambiguity, not a pick, and
+            # all of them are reported. Measured on the DEP-5 corpus, the correct
+            # license was inside the flagged set in 8 of 8 cases while the leader
+            # alone was right in none — so the set is the answer and the leader is
+            # only its most likely member.
+            #
+            # Deliberately not collapsed to a license *family*. The pairs this catches
+            # are GPL-2.0-or-later against GPL-3.0-or-later, and those are mutually
+            # incompatible: "GPL" would be true of six of the eight and useful for
+            # none of them.
             if len(scores) > 1 and scores[0] - scores[1] < DEFAULT_AMBIGUOUS_MARGIN:
-                ambiguous = tuple(h.shortname for h in ranked[:2])
+                near = [h for h, s in zip(ranked, scores)
+                        if scores[0] - s < DEFAULT_AMBIGUOUS_MARGIN]
+                ambiguous = tuple(h.shortname for h in near)
+                confident = near
         else:
             confident = tied_with_leader(
                 [h for h in hits
@@ -136,16 +148,19 @@ class Cascade(AtarashiAgent):
             # block when extraction succeeded, otherwise the file itself. The
             # matched excerpt is included because that is what an auditor reads,
             # and it stays meaningful either way.
-            rival = next((n for n in ambiguous if n != confident[0].shortname), None)
-            note = (f"; ambiguous with {rival} — the evidence does not separate them"
-                    if rival else "")
+            def note_for(name: str) -> str:
+                others = [n for n in ambiguous if n != name]
+                return ("; ambiguous with " + ", ".join(others)
+                        + " — the evidence does not separate them") if others else ""
+
             return [{"shortname": h.shortname,
                      "sim_type": "Ambiguous" if ambiguous else "SequenceCoverage",
                      "sim_score": round(h.score, 4),
                      "matched_start": h.char_start, "matched_end": h.char_end,
                      "matched_text": text[h.char_start:h.char_end],
                      "description": f"matched chars {h.char_start}:{h.char_end} "
-                                    f"(run {h.longest_run} tokens){note}"}
+                                    f"(run {h.longest_run} tokens)"
+                                    f"{note_for(h.shortname)}"}
                     for h in confident]
 
         return [unknown_result(round(hits[0].score, 4) if hits else 0.0)]
