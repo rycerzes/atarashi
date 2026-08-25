@@ -211,3 +211,15 @@ def test_single_license_match_still_reports_one_license(tmp_path):
     out = _scan(tmp_path, "/*\n * Copyright 2020 Acme\n * " + MIT_TEXT + "\n */\nint main(){}")
     assert [r["shortname"] for r in out] == ["MIT"]
     assert out[0]["expression"] == "MIT"
+
+
+def test_license_dot_txt_is_not_mangled_by_comment_extraction(tmp_path):
+    """`LICENSE.txt` is prose, not code. Nirjas maps `.txt` to a "text" language and
+    ran comment extraction over it, dropping content: a verbatim GPL-3.0 body lost
+    1,315 characters and the cascade abstained, while the same bytes named `LICENSE`
+    resolved. Measured on the Software Heritage annotated sample."""
+    body = MIT_TEXT + " " + MIT_TEXT
+    as_txt = tmp_path / "LICENSE.txt"
+    as_txt.write_text(body)
+    agent = Cascade(LICENSES, use_gate=False)
+    assert agent._comment_text(str(as_txt), "FALLBACK").strip() == body.strip()
