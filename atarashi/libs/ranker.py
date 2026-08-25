@@ -167,6 +167,45 @@ def load_ranker(path: Path | None = None):
     return bundle
 
 
+def _in_scope(shortname: str, bundle) -> bool:
+    """Whether the model has any business ranking this candidate.
+
+    **Family granularity, and licence granularity was measured and rejected.** Gating
+    on the family lets the model act on `MIT-advertising` because `MIT` was trained,
+    and it then promotes plain MIT over it: on the Software Heritage tail the learned
+    ranker is *worse* than the matcher's own ordering, R@1 0.758 -> 0.697, with the
+    correct licence at matcher rank 1 in seven of the misses. Gating on the 37 trained
+    licences instead fixes exactly that (tail R@1 0.697 -> 0.742) — and costs far more
+    than it buys, because it also declines the case that is the ranker's single largest
+    win on the head corpora.
+
+    Measured on 916 head-corpus queries: when the matcher's leader is an *untrained*
+    licence the ranker helps in 74 of 117 and hurts in none, because there the leader
+    is usually wrong and the correct licence is one the model knows. On the tail the
+    same situation inverts — an untrained leader is *correct* 34 times in 43 — and the
+    two are not separable by evidence: median query coverage is 0.969 when the
+    untrained leader is right and 0.957 when it is wrong.
+
+    So there is no inference-time signal to gate on. The bias toward trained licences
+    is real and whether it is correct depends on whether the file's licence is in the
+    training set, which cannot be known while scanning. End to end, licence gating cost
+    DEP-5 R@1 0.8435 -> 0.8003 to gain 0.045 on the tail; the head is the larger
+    population, so families stay. The artifact still records `licenses`, because the
+    fix for this is a training set wider than 37 licences — at *licence* granularity,
+    a different axis from the family-count curve that plateaus at 12.
+    """
+    if not bundle:
+        return False
+    known = bundle.get("families")
+    if not known:
+        return True
+    # "OTHER" is the bucket for names the family rule does not recognise, not a
+    # family. Its presence in training says nothing about whether *this* licence
+    # was covered, so it cannot license a decision.
+    leader = family(shortname)
+    return leader != "OTHER" and leader in known
+
+
 def accept(matches, bundle, threshold: float | None = None) -> bool | None:
     """Whether the leading candidate is worth reporting.
 
@@ -178,9 +217,7 @@ def accept(matches, bundle, threshold: float | None = None) -> bool | None:
     """
     if not bundle or not matches:
         return None
-    known = bundle.get("families")
-    if known and (family(matches[0].shortname) == "OTHER"
-                  or family(matches[0].shortname) not in known):
+    if not _in_scope(matches[0].shortname, bundle):
         return None
     tau = bundle.get("accept", DEFAULT_ACCEPT) if threshold is None else threshold
     try:
@@ -199,9 +236,7 @@ def score_candidates(matches, bundle):
     """
     if not bundle or not matches:
         return None
-    known = bundle.get("families")
-    if known and (family(matches[0].shortname) == "OTHER"
-                  or family(matches[0].shortname) not in known):
+    if not _in_scope(matches[0].shortname, bundle):
         return None
     try:
         rows = featurize(matches)
@@ -224,14 +259,8 @@ def rerank(matches, bundle):
     """
     if not bundle or len(matches) < 2:
         return matches
-    known = bundle.get("families")
-    if known:
-        leader = family(matches[0].shortname)
-        # "OTHER" is the bucket for names the family rule does not recognise, not a
-        # family. Its presence in training says nothing about whether *this* license
-        # was covered, so it cannot license a decision.
-        if leader == "OTHER" or leader not in known:
-            return matches
+    if not _in_scope(matches[0].shortname, bundle):
+        return matches
     try:
         rows = featurize(matches)
         scores = bundle["model"].predict_proba(bundle["scaler"].transform(rows))[:, 1]
