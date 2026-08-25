@@ -12,7 +12,7 @@ from atarashi.libs.decision import (DEFAULT_MIN_COVERAGE, DEFAULT_STRONG_RUN,
 from atarashi.libs.gate import should_scan
 from atarashi.libs.ranker import (DEFAULT_ACCEPT, DEFAULT_AMBIGUOUS_MARGIN,
                                   load_ranker, score_candidates)
-from atarashi.libs.references import load_notice_units
+from atarashi.libs.references import expression_components, load_notice_units
 from atarashi.libs.sequence import DEFAULT_MIN_RUN, LicenseMatcher, tied_with_leader
 from atarashi.spdx.resolver import detect_and_resolve
 
@@ -107,7 +107,7 @@ class Cascade(AtarashiAgent):
         exact = self.matcher.exact(text)
         if exact:
             return [{"shortname": exact, "sim_type": "ExactFullText",
-                     "sim_score": 1.0, "description": ""}]
+                     "sim_score": 1.0, "expression": exact, "description": ""}]
 
         hits = self.matcher.match(text, min_run=self.min_run)
         # The learned reject option replaces the run/coverage bar rather than stacking
@@ -153,14 +153,22 @@ class Cascade(AtarashiAgent):
                 return ("; ambiguous with " + ", ".join(others)
                         + " — the evidence does not separate them") if others else ""
 
-            return [{"shortname": h.shortname,
+            # A compound unit matched one span but attests to several licenses, so it
+            # expands to one result per component, each carrying the whole expression
+            # — the same contract the SPDX-tag path already emits. Reporting only the
+            # leading license would drop the exception that makes the grant what it
+            # is. Every result keeps the span of the unit that matched, because that
+            # single span is the evidence for the whole expression.
+            return [{"shortname": component,
                      "sim_type": "Ambiguous" if ambiguous else "SequenceCoverage",
                      "sim_score": round(h.score, 4),
+                     "expression": h.shortname,
                      "matched_start": h.char_start, "matched_end": h.char_end,
                      "matched_text": text[h.char_start:h.char_end],
                      "description": f"matched chars {h.char_start}:{h.char_end} "
                                     f"(run {h.longest_run} tokens)"
                                     f"{note_for(h.shortname)}"}
-                    for h in confident]
+                    for h in confident
+                    for component in expression_components(h.shortname)]
 
         return [unknown_result(round(hits[0].score, 4) if hits else 0.0)]

@@ -174,7 +174,12 @@ Real files carry short license *notices* and one-line references, not license
 bodies — "Licensed under the Apache License, Version 2.0, see LICENSE for details."
 appears in no license text anywhere. Alongside the license list, the agent indexes
 a notice layer built from scancode-toolkit's rules:
-`atarashi/data/licenses/notice_rules.json`, 24k units across 986 licenses.
+`atarashi/data/licenses/notice_rules.json`, 28k units across 2,024 keys.
+
+1,038 of those keys are whole expressions — `Apache-2.0 WITH LLVM-exception` — because
+the compound rules carry the register untagged files use. A file saying "under the
+Apache License v2.0 with LLVM Exceptions" is matched as one unit and reported as both
+licenses, each result carrying the `expression` it came from.
 
 That artifact is committed, so **installing Atarashi never pulls scancode-toolkit
 in**. Regenerate it only when you want to track a newer ScanCode:

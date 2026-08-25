@@ -39,7 +39,10 @@ DEFAULT_OUT = Path(__file__).resolve().parents[1] / "atarashi" / "data" / "licen
 # corpus: 10,624 of 36,472 rules carry braces and none is an old numeric gap
 # template, so there is no wildcard case left to handle.)
 _BRACE = re.compile(r"\{\{(.*?)\}\}", re.DOTALL)
-_COMPOUND = re.compile(r"\s+(?:AND|OR|WITH)\s+", re.IGNORECASE)
+# Splits an expression while keeping the operators, so a compound key can be
+# rebuilt over SPDX ids: "gpl-2.0 WITH classpath-exception-2.0" -> ["gpl-2.0",
+# "WITH", "classpath-exception-2.0"]. Even indices are licenses, odd are operators.
+_COMPOUND = re.compile(r"\s+(AND|OR|WITH)\s+", re.IGNORECASE)
 
 # The short-form register real files actually carry. Full license bodies are already
 # covered by Atarashi's own license list, so `is_license_text` rules are not taken.
@@ -52,11 +55,50 @@ MIN_CHARS = 15
 MAX_CHARS = 3000
 
 
-def build(min_chars: int = MIN_CHARS, max_chars: int = MAX_CHARS) -> list[tuple[str, str, list[str]]]:
-    """Extract single-license short-form rules as (SPDX id, text, required phrases).
+def _spdx_key(expression: str, db) -> str:
+    """Rewrite a ScanCode license expression over SPDX ids, or "" if any part is unknown.
 
-    Compound (AND/OR/WITH) rules are skipped: they key to an expression rather than
-    one license, and Atarashi composes expressions from the SPDX detector instead.
+    A single-license expression comes back as a bare SPDX id, so the common case is
+    unchanged. A compound one keeps its operators, upper-cased, and is keyed as the
+    whole expression: ``Apache-2.0 WITH LLVM-exception``. All components must resolve
+    — a half-mapped expression would name a license the rule does not attest to.
+    """
+    parts = _COMPOUND.split(expression.strip())
+    out: list[str] = []
+    for position, part in enumerate(parts):
+        if position % 2:
+            out.append(part.upper())
+            continue
+        entry = db.get(part.strip().lower())
+        spdx = (getattr(entry, "spdx_license_key", "") or "").strip() if entry else ""
+        if not spdx:
+            return ""
+        out.append(spdx)
+    return " ".join(out)
+
+
+def build(min_chars: int = MIN_CHARS, max_chars: int = MAX_CHARS) -> list[tuple[str, str, list[str]]]:
+    """Extract short-form rules as (SPDX id or expression, text, required phrases).
+
+    Compound (AND/OR/WITH) rules used to be skipped, on the reasoning that Atarashi
+    composes expressions from the SPDX detector instead. That holds only for files
+    carrying a tag. It discarded 3,941 of 29,567 short-form rules (13.3%), 1,157 of
+    them ``WITH`` exceptions, and with them the register that files without a tag
+    actually carry: the prose "The LLVM Project is under the Apache License v2.0 with
+    LLVM Exceptions:" lives in a compound rule, while ``LLVM-exception``'s own
+    single-license rules are all 1-3 tokens and fall below the indexing floor. The
+    exception was therefore unreachable — 0 indexed units — for 22 of the 65 real
+    ``WITH``-labelled spans in the-stack corpus.
+
+    Measured on 292 real compound-labelled spans, indexing them takes full-expression
+    R@1 from 0.000 (structurally impossible) to 0.921, and 0.788 under leave-one-out
+    masking of units contained verbatim in a query. The primary license alone also
+    improves, 0.490 -> 0.969 (0.370 -> 0.853 masked), because a compound rule's text
+    is the register those files carry. Cost on single-license queries: -0.0015 on the
+    671 DEP-5 notice queries (independent Debian labels) and -0.0070 on 5,968
+    single-license spans — roughly three gained per one lost, the same trade the
+    short-reference floor already accepted.
+
     Keys are emitted as SPDX ids so the artifact is independent of both ScanCode's
     and FOSSology's internal naming; the loader maps them to its own shortnames.
     """
@@ -69,12 +111,11 @@ def build(min_chars: int = MIN_CHARS, max_chars: int = MAX_CHARS) -> list[tuple[
     units: list[tuple[str, str, list[str]]] = []
     for rule in load_rules(base):
         expr = (rule.license_expression or "").strip()
-        if not expr or _COMPOUND.search(expr):
+        if not expr:
             continue
         if not any(getattr(rule, kind, False) for kind in RULE_KINDS):
             continue
-        entry = db.get(expr.lower())
-        spdx = (getattr(entry, "spdx_license_key", "") or "").strip() if entry else ""
+        spdx = _spdx_key(expr, db)
         if not spdx:
             continue
         raw = rule.text() if callable(getattr(rule, "text", None)) else getattr(rule, "text", "")
@@ -112,10 +153,12 @@ def main(argv=None) -> None:
     args.out.write_text(json.dumps(payload))
 
     licenses = {u[0] for u in units}
+    compound = {u[0] for u in units if _COMPOUND.search(u[0])}
     gated = sum(1 for u in units if u[2])
     size_mb = args.out.stat().st_size / 1e6
-    print(f"wrote {len(units)} units across {len(licenses)} licenses "
-          f"({gated} with required phrases) -> {args.out} ({size_mb:.1f} MB)")
+    print(f"wrote {len(units)} units across {len(licenses)} keys "
+          f"({len(compound)} compound expressions, {gated} with required phrases) "
+          f"-> {args.out} ({size_mb:.1f} MB)")
 
 
 if __name__ == "__main__":

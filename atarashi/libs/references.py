@@ -19,12 +19,18 @@ SPDX-License-Identifier: GPL-2.0-only
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 from atarashi.spdx.resolver import lookup_shortname, shortname_index
 
 DEFAULT_INDEX = Path(__file__).resolve().parents[1] / "data" / "licenses" / "notice_rules.json"
+
+# Artifact keys are either a bare SPDX id or a whole expression. Splitting on the
+# operators while keeping them lets a key be mapped component-by-component onto the
+# caller's shortnames and rebuilt: even indices are licenses, odd are operators.
+_OPERATOR = re.compile(r"\s+(AND|OR|WITH)\s+", re.IGNORECASE)
 
 # Shortest reference unit worth indexing. Swept three times; the answer is 5 each
 # time, but for different reasons, so both are recorded.
@@ -51,10 +57,49 @@ DEFAULT_INDEX = Path(__file__).resolve().parents[1] / "data" / "licenses" / "not
 MIN_UNIT_TOKENS = 5
 
 
+def expression_components(name: str) -> list[str]:
+    """The licenses a reference key names — one for a plain id, several for an expression.
+
+    ``Apache-2.0 WITH LLVM-exception`` names two, and a result has to report both:
+    the exception is what makes the Apache grant usable with GPL-2.0 code, so
+    dropping it reports a different license than the file declares.
+    """
+    return [part for position, part in enumerate(_OPERATOR.split(name.strip()))
+            if position % 2 == 0]
+
+
+def resolve_key(key: str, index: dict[str, str]) -> str | None:
+    """Map an artifact key onto the caller's shortnames, or None if any part is unknown.
+
+    A compound key resolves only when *every* component does. Half of an expression
+    is not a weaker answer, it is a different one — reporting ``GPL-2.0-only`` for a
+    rule that attests to ``GPL-2.0-only WITH Classpath-exception-2.0`` states an
+    obligation the file does not carry.
+    """
+    if not _OPERATOR.search(key):
+        return lookup_shortname(key, index)
+    out: list[str] = []
+    for position, part in enumerate(_OPERATOR.split(key.strip())):
+        if position % 2:
+            out.append(part.upper())
+            continue
+        shortname = lookup_shortname(part, index)
+        if shortname is None:
+            return None
+        out.append(shortname)
+    return " ".join(out)
+
+
 def load_notice_units(shortnames: Iterable[str],
                       path: Path | None = None,
                       min_tokens: int = MIN_UNIT_TOKENS) -> Iterator[tuple[str, str, list[str]]]:
     """Yield ``(shortname, text, required_phrases)`` for licenses the caller knows.
+
+    ``shortname`` is a whole expression for a compound unit — ``Apache-2.0 WITH
+    LLVM-exception`` — so the matcher ranks an expression as one candidate against
+    its component licenses, which is the comparison the evidence supports: a rule
+    naming the exception is stronger evidence than one that does not.
+    ``expression_components`` splits it again at reporting time.
 
     Units keyed to a license absent from ``shortnames`` are dropped: the agent can
     only report licenses in its own list, so indexing the rest costs match time and
@@ -81,6 +126,6 @@ def load_notice_units(shortnames: Iterable[str],
         phrases = unit[2] if len(unit) > 2 else []
         if len(text.split()) < min_tokens:
             continue
-        shortname = lookup_shortname(spdx, index)
+        shortname = resolve_key(spdx, index)
         if shortname is not None:
             yield shortname, text, phrases
