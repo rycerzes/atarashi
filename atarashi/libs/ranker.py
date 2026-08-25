@@ -167,6 +167,23 @@ def load_ranker(path: Path | None = None):
     return bundle
 
 
+def _list_in_scope(matches, bundle) -> bool:
+    """Whether the model may rank this candidate list.
+
+    Gating on the *leader* was wrong in a way the prevalence benchmark made obvious.
+    A verbatim Apache-2.0 body puts `ImageMagick` first — its licence is Apache-2.0
+    plus extra text, so it wins the longest run (847 against 764) while covering 0.81
+    of its own reference against Apache-2.0's 0.996. `family("ImageMagick")` is OTHER,
+    so the gate declined, the hand-tuned run-first ordering stood, and **286 of 639
+    Apache-2.0 files were reported as ImageMagick**.
+
+    The model's competence is about the licences it can recognise, not about whichever
+    candidate the run-length heuristic happened to put on top. So the list is in scope
+    when *any* candidate is, and the model is free to promote the one it knows.
+    """
+    return any(_in_scope(m.shortname, bundle) for m in matches)
+
+
 def _in_scope(shortname: str, bundle) -> bool:
     """Whether the model has any business ranking this candidate.
 
@@ -217,7 +234,7 @@ def accept(matches, bundle, threshold: float | None = None) -> bool | None:
     """
     if not bundle or not matches:
         return None
-    if not _in_scope(matches[0].shortname, bundle):
+    if not _list_in_scope(matches, bundle):
         return None
     tau = bundle.get("accept", DEFAULT_ACCEPT) if threshold is None else threshold
     try:
@@ -236,7 +253,7 @@ def score_candidates(matches, bundle):
     """
     if not bundle or not matches:
         return None
-    if not _in_scope(matches[0].shortname, bundle):
+    if not _list_in_scope(matches, bundle):
         return None
     try:
         rows = featurize(matches)
@@ -259,7 +276,7 @@ def rerank(matches, bundle):
     """
     if not bundle or len(matches) < 2:
         return matches
-    if not _in_scope(matches[0].shortname, bundle):
+    if not _list_in_scope(matches, bundle):
         return matches
     try:
         rows = featurize(matches)
