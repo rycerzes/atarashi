@@ -10,6 +10,8 @@ from atarashi.libs.commentPreprocessor import CommentPreprocessor
 from atarashi.libs.decision import (DEFAULT_MIN_COVERAGE, DEFAULT_STRONG_RUN,
                                     is_confident, unknown_result)
 from atarashi.libs.gate import should_scan
+from atarashi.libs.normalize import tokens
+from atarashi.libs.orlater import corrected as orlater_corrected
 from atarashi.libs.ranker import (DEFAULT_ACCEPT, DEFAULT_AMBIGUOUS_MARGIN,
                                   load_ranker, score_candidates)
 from atarashi.libs.references import expression_components, load_notice_units
@@ -48,6 +50,11 @@ class Cascade(AtarashiAgent):
         # Absent artifact => None => the hand-tuned ordering stands.
         self.ranker = load_ranker(ranker_path) if use_ranker else None
         self.matcher = LicenseMatcher(self._reference_units())
+        # Token length of each license's own body, so a match can be recognised as
+        # "the file *is* this license" rather than "the file cites it". That is the
+        # only case where -only and -or-later are indistinguishable; see libs/orlater.
+        self._body_tokens = {str(row["shortname"]): len(tokens(str(row["processed_text"])))
+                             for _, row in self.licenseList.iterrows()}
 
     def _reference_units(self):
         """Every matchable unit: full texts, headers, and the notice layer.
@@ -148,6 +155,12 @@ class Cascade(AtarashiAgent):
             # block when extraction succeeded, otherwise the file itself. The
             # matched excerpt is included because that is what an auditor reads,
             # and it stays meaningful either way.
+            known = frozenset(str(n) for n in self.licenseList["shortname"])
+
+            def resolve(name: str, hit) -> str:
+                body = self._body_tokens.get(name) == hit.ref_tokens
+                return orlater_corrected(name, body, known)
+
             def note_for(name: str) -> str:
                 others = [n for n in ambiguous if n != name]
                 return ("; ambiguous with " + ", ".join(others)
@@ -159,7 +172,11 @@ class Cascade(AtarashiAgent):
             # leading license would drop the exception that makes the grant what it
             # is. Every result keeps the span of the unit that matched, because that
             # single span is the evidence for the whole expression.
-            return [{"shortname": component,
+            # The only/or-later siblings share a byte-identical reference text, so
+            # when the *body* is what matched, the evidence cannot separate them and
+            # a bare body is -only. See libs/orlater.py, including the query-side
+            # rule that looks obvious and measured worse.
+            return [{"shortname": resolve(component, h),
                      "sim_type": "Ambiguous" if ambiguous else "SequenceCoverage",
                      "sim_score": round(h.score, 4),
                      "expression": h.shortname,
