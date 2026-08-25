@@ -47,6 +47,14 @@ _BASE = 1 << 21
 # alignment is now cheap enough that the cap is a safety rail, not a tuning knob.
 DEFAULT_MAX_CANDIDATES = 400
 
+# How many ranked candidates leave the matcher. Five was never swept: measured on the
+# Software Heritage tail, five of the six queries whose correct licence was "missing
+# from retrieval" in fact sat at ranks 15-46, so most of what looked like an index gap
+# was this truncation. The ranker normalises features *within* the candidate list, so
+# this cannot be raised at inference alone — the model has to be refit at the same
+# depth. See the engine report.
+DEFAULT_TOP_K = 5
+
 
 @dataclass(frozen=True)
 class SpanMatch:
@@ -217,7 +225,8 @@ class LicenseMatcher:
         # A run of c consecutive shingles spans c + n - 1 tokens.
         return [(si, sj, c + n - 1) for si, sj, c in runs]
 
-    def match(self, query: str, min_run: int = DEFAULT_MIN_RUN, top_k: int = 5) -> list[SpanMatch]:
+    def match(self, query: str, min_run: int = DEFAULT_MIN_RUN,
+              top_k: int = DEFAULT_TOP_K) -> list[SpanMatch]:
         """Return the best reference matches within ``query``, ranked by the longest
         contiguous matched run.
 

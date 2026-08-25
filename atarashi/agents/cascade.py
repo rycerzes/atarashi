@@ -15,7 +15,8 @@ from atarashi.libs.orlater import corrected as orlater_corrected
 from atarashi.libs.ranker import (DEFAULT_ACCEPT, DEFAULT_AMBIGUOUS_MARGIN,
                                   load_ranker, score_candidates)
 from atarashi.libs.references import expression_components, load_notice_units
-from atarashi.libs.sequence import DEFAULT_MIN_RUN, LicenseMatcher, tied_with_leader
+from atarashi.libs.sequence import (DEFAULT_MIN_RUN, DEFAULT_TOP_K, LicenseMatcher,
+                                    tied_with_leader)
 from atarashi.spdx.resolver import detect_and_resolve
 
 
@@ -39,11 +40,12 @@ class Cascade(AtarashiAgent):
     def __init__(self, licenseList, verbose=0, min_run=DEFAULT_MIN_RUN,
                  strong_run=DEFAULT_STRONG_RUN, min_coverage=DEFAULT_MIN_COVERAGE,
                  use_gate=True, use_notices=True, notice_path=None,
-                 use_ranker=True, ranker_path=None):
+                 use_ranker=True, ranker_path=None, top_k=DEFAULT_TOP_K):
         super().__init__(licenseList, verbose)
         self.min_run = min_run
         self.strong_run = strong_run
         self.min_coverage = min_coverage
+        self.top_k = top_k
         self.use_gate = use_gate
         self.use_notices = use_notices
         self.notice_path = notice_path
@@ -116,7 +118,7 @@ class Cascade(AtarashiAgent):
             return [{"shortname": exact, "sim_type": "ExactFullText",
                      "sim_score": 1.0, "expression": exact, "description": ""}]
 
-        hits = self.matcher.match(text, min_run=self.min_run)
+        hits = self.matcher.match(text, min_run=self.min_run, top_k=self.top_k)
         # The learned reject option replaces the run/coverage bar rather than stacking
         # on it: that bar reads only the retained unit, so it abstained on licenses
         # whose *other* units the query covered completely. Where the model has no
