@@ -141,9 +141,13 @@ class Cascade(AtarashiAgent):
             # are GPL-2.0-or-later against GPL-3.0-or-later, and those are mutually
             # incompatible: "GPL" would be true of six of the eight and useful for
             # none of them.
-            if len(scores) > 1 and scores[0] - scores[1] < DEFAULT_AMBIGUOUS_MARGIN:
+            # Model-dependent, so it travels in the artifact: a flatter score
+            # distribution turns the same fixed margin into false ambiguity, which
+            # costs exact-set on answers that were never in doubt.
+            margin = self.ranker.get("ambiguous_margin", DEFAULT_AMBIGUOUS_MARGIN)
+            if len(scores) > 1 and scores[0] - scores[1] < margin:
                 near = [h for h, s in zip(ranked, scores)
-                        if scores[0] - s < DEFAULT_AMBIGUOUS_MARGIN]
+                        if scores[0] - s < margin]
                 ambiguous = tuple(h.shortname for h in near)
                 confident = near
         else:
