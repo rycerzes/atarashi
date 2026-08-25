@@ -5,7 +5,8 @@ SPDX-License-Identifier: GPL-2.0-only
 """
 import json
 
-from atarashi.libs.references import DEFAULT_INDEX, load_notice_units
+from atarashi.libs.references import (DEFAULT_INDEX, expression_components,
+                                      load_notice_units)
 
 
 def _artifact(tmp_path, units):
@@ -69,3 +70,41 @@ def test_required_phrases_travel_with_the_unit(tmp_path):
     path = _artifact(tmp_path, [["MPL-2.0", LONG, ["no copyleft exception"]]])
     assert list(load_notice_units(["MPL-2.0"], path=path)) == [
         ("MPL-2.0", LONG, ["no copyleft exception"])]
+
+
+def test_compound_key_maps_every_component(tmp_path):
+    """An expression is indexed as one unit; all of its licenses must resolve."""
+    path = _artifact(tmp_path, [["Apache-2.0 WITH LLVM-exception", LONG]])
+    units = list(load_notice_units(["Apache-2.0", "LLVM-exception"], path=path))
+    assert units == [("Apache-2.0 WITH LLVM-exception", LONG, [])]
+
+
+def test_compound_key_dropped_when_a_component_is_unknown(tmp_path):
+    """Half an expression is a different license, not a weaker answer: reporting
+    Apache-2.0 for a rule that attests to the exception states the wrong grant."""
+    path = _artifact(tmp_path, [["Apache-2.0 WITH LLVM-exception", LONG]])
+    assert list(load_notice_units(["Apache-2.0"], path=path)) == []
+
+
+def test_compound_key_normalizes_the_operator(tmp_path):
+    path = _artifact(tmp_path, [["MIT or Apache-2.0", LONG]])
+    units = list(load_notice_units(["MIT", "Apache-2.0"], path=path))
+    assert units == [("MIT OR Apache-2.0", LONG, [])]
+
+
+def test_expression_components_splits_on_every_operator():
+    assert expression_components("Apache-2.0") == ["Apache-2.0"]
+    assert expression_components("Apache-2.0 WITH LLVM-exception") == [
+        "Apache-2.0", "LLVM-exception"]
+    assert expression_components("MIT OR GPL-2.0-only AND BSD-3-Clause") == [
+        "MIT", "GPL-2.0-only", "BSD-3-Clause"]
+
+
+def test_shipped_artifact_carries_the_compound_layer():
+    """Compound rules were skipped at build time until they were measured: 3,941 of
+    29,567 short-form rules, 1,157 of them WITH exceptions. LLVM-exception's own
+    single-license rules are all 1-3 tokens, so the exception was unreachable."""
+    payload = json.loads(DEFAULT_INDEX.read_text())
+    keys = {u[0] for u in payload["units"]}
+    assert sum(1 for k in keys if " WITH " in k) > 100
+    assert "Apache-2.0 WITH LLVM-exception" in keys

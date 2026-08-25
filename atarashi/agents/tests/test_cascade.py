@@ -178,3 +178,36 @@ def test_empty_extraction_falls_back_to_raw(tmp_path, monkeypatch):
     f = tmp_path / "src.py"
     f.write_text(MIT_TEXT)
     assert Cascade(LICENSES).scan(str(f))[0]["shortname"] == "MIT"
+
+
+def test_compound_match_reports_every_license_it_attests_to(tmp_path):
+    """A compound unit matched one span but names several licenses, and the exception
+    is what makes the grant what it is — reporting only the leader states a different
+    license than the file declares. Same contract the SPDX-tag path already emits."""
+    import json
+
+    licenses = pd.DataFrame({
+        "shortname": ["Apache-2.0", "LLVM-exception"],
+        "processed_text": ["Apache License Version 2.0 full body text here", "x"],
+        "processed_header": ["", ""],
+    })
+    notice = tmp_path / "notice_rules.json"
+    notice.write_text(json.dumps({"source": "test", "units": [
+        ["Apache-2.0 WITH LLVM-exception",
+         "The LLVM Project is under the Apache License v2.0 with LLVM Exceptions"]]}))
+    f = tmp_path / "src.c"
+    f.write_text("// Part of the LLVM Project, under the Apache License v2.0 "
+                 "with LLVM Exceptions.\nint main(){}")
+    out = Cascade(licenses, notice_path=str(notice), use_ranker=False,
+                  strong_run=8).scan(str(f))
+
+    assert [r["shortname"] for r in out] == ["Apache-2.0", "LLVM-exception"]
+    assert {r["expression"] for r in out} == {"Apache-2.0 WITH LLVM-exception"}
+    assert all(r["matched_text"] for r in out)
+
+
+def test_single_license_match_still_reports_one_license(tmp_path):
+    """The expansion must not multiply results for a plain reference."""
+    out = _scan(tmp_path, "/*\n * Copyright 2020 Acme\n * " + MIT_TEXT + "\n */\nint main(){}")
+    assert [r["shortname"] for r in out] == ["MIT"]
+    assert out[0]["expression"] == "MIT"
