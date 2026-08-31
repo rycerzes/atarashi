@@ -131,7 +131,8 @@ class Cascade(AtarashiAgent):
             return [{"shortname": exact, "sim_type": "ExactFullText",
                      "sim_score": 1.0, "expression": exact, "description": ""}]
 
-        hits = self.matcher.match(text, min_run=self.min_run, top_k=self.top_k)
+        hits, evidence = self.matcher.match_with_evidence(
+            text, min_run=self.min_run, top_k=self.top_k)
         # The learned reject option replaces the run/coverage bar rather than stacking
         # on it: that bar reads only the retained unit, so it abstained on licenses
         # whose *other* units the query covered completely. Where the model has no
@@ -195,6 +196,27 @@ class Cascade(AtarashiAgent):
             # when the *body* is what matched, the evidence cannot separate them and
             # a bare body is -only. See libs/orlater.py, including the query-side
             # rule that looks obvious and measured worse.
+            def components(name: str) -> list[str]:
+                """A key's licenses, best-supported first.
+
+                An expression names several licenses and the engine reports all of
+                them, but the first one is what a top-1 consumer reads. Taking it
+                from the order the rule's author wrote the expression in is a coin
+                flip: a plain BSD-2-Clause file matching a `GPL-2.0-only OR
+                BSD-2-Clause` rule was reported as GPL-2.0-only, with BSD-2-Clause
+                second, on 16 files in the prevalence pool.
+
+                The query itself settles it. `evidence` carries, for every key the
+                matcher aligned, how completely the query filled that license's own
+                units — so a component the file independently supports leads, and one
+                that appears only inside the compound rule follows. Order alone
+                changes; the set is untouched, so this cannot alter exact-set.
+                """
+                parts = expression_components(name)
+                if len(parts) < 2:
+                    return parts
+                return sorted(parts, key=lambda c: -evidence.get(c, 0.0))
+
             return [{"shortname": resolve(component, h),
                      "sim_type": "Ambiguous" if ambiguous else "SequenceCoverage",
                      "sim_score": round(h.score, 4),
@@ -205,6 +227,6 @@ class Cascade(AtarashiAgent):
                                     f"(run {h.longest_run} tokens)"
                                     f"{note_for(h.shortname)}"}
                     for h in confident
-                    for component in expression_components(h.shortname)]
+                    for component in components(h.shortname)]
 
         return [unknown_result(round(hits[0].score, 4) if hits else 0.0)]

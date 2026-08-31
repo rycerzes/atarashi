@@ -227,8 +227,22 @@ class LicenseMatcher:
 
     def match(self, query: str, min_run: int = DEFAULT_MIN_RUN,
               top_k: int = DEFAULT_TOP_K) -> list[SpanMatch]:
-        """Return the best reference matches within ``query``, ranked by the longest
-        contiguous matched run.
+        """The best reference matches within ``query``; see ``match_with_evidence``."""
+        return self.match_with_evidence(query, min_run, top_k)[0]
+
+    def match_with_evidence(
+            self, query: str, min_run: int = DEFAULT_MIN_RUN,
+            top_k: int = DEFAULT_TOP_K) -> tuple[list[SpanMatch], dict[str, float]]:
+        """Return the best reference matches, plus per-key evidence for all of them.
+
+        The second value maps every key the matcher aligned — plain license or whole
+        expression — to the best coverage any of its units reached, including the keys
+        that did not make ``top_k``. A compound candidate needs it: reporting
+        ``GPL-2.0-only OR BSD-2-Clause`` means naming both licenses, and which of them
+        to name *first* is answered by which one the query supports on its own units,
+        not by the order somebody wrote the expression in.
+
+        Ranked by the longest contiguous matched run.
 
         Ranking by the longest run (not coverage) rewards a distinctive license
         phrase over scattered common-word overlap, and is robust to references of
@@ -243,7 +257,7 @@ class LicenseMatcher:
         spans = token_spans(query)
         q_tokens = [tok for tok, _, _ in spans]
         if len(q_tokens) < self.shingle:
-            return []
+            return [], {}
         q_ids = self._query_ids(q_tokens)
         q_joined = f" {' '.join(q_tokens)} "
 
@@ -255,7 +269,7 @@ class LicenseMatcher:
             for uid in self._index.get(key, ()):
                 counts[uid] = counts.get(uid, 0) + 1
         if not counts:
-            return []
+            return [], {}
         # Shared-shingle count bounds the achievable run, so the tail cannot win.
         candidates = sorted(counts, key=counts.get, reverse=True)[:self.max_candidates]
 
@@ -305,7 +319,8 @@ class LicenseMatcher:
                           units_matched=corroboration[name][1])
                   for name, m in best.items()]
         results = sorted(merged, key=_rank, reverse=True)
-        return results[:top_k]
+        evidence = {name: cov for name, (cov, _) in corroboration.items()}
+        return results[:top_k], evidence
 
 
 def _rank(match: SpanMatch) -> tuple[int, float, bool]:
