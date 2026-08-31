@@ -206,6 +206,45 @@ def test_compound_match_reports_every_license_it_attests_to(tmp_path):
     assert all(r["matched_text"] for r in out)
 
 
+def test_compound_names_the_license_the_file_supports_first(tmp_path):
+    """Which component leads is decided by the query, not by the rule's wording.
+
+    A plain BSD-2-Clause file that matched a `GPL-2.0-only OR BSD-2-Clause` rule was
+    reported as GPL-2.0-only with BSD-2-Clause second, because that is the order the
+    rule's author wrote it in. The file carries BSD text and no GPL text, so
+    BSD-2-Clause is what it supports. The reported set is identical either way; only
+    the order a top-1 consumer reads changes.
+    """
+    import json
+
+    bsd = ("Redistribution and use in source and binary forms, with or without "
+           "modification, are permitted provided that the following conditions are "
+           "met: Redistributions of source code must retain the above copyright "
+           "notice, this list of conditions and the following disclaimer.")
+    licenses = pd.DataFrame({
+        "shortname": ["GPL-2.0-only", "BSD-2-Clause"],
+        "processed_text": [
+            "This program is free software you can redistribute it under the terms "
+            "of the GNU General Public License version 2 as published by the Free "
+            "Software Foundation",
+            # Longer than the compound unit, so the compound wins on coverage while
+            # this unit still supplies BSD-2-Clause's independent evidence.
+            bsd + " Neither the name of the holder may be used to endorse products."],
+        "processed_header": ["", ""],
+    })
+    notice = tmp_path / "notice_rules.json"
+    notice.write_text(json.dumps({"source": "test", "units": [
+        ["GPL-2.0-only OR BSD-2-Clause", bsd]]}))
+    f = tmp_path / "LICENSE"
+    f.write_text("Copyright (c) 2020 Acme Corporation. All rights reserved.\n" + bsd)
+
+    out = Cascade(licenses, notice_path=str(notice), use_ranker=False,
+                  strong_run=8).scan(str(f))
+    names = [r["shortname"] for r in out]
+    assert set(names) == {"BSD-2-Clause", "GPL-2.0-only"}, names
+    assert names[0] == "BSD-2-Clause", names
+
+
 def test_single_license_match_still_reports_one_license(tmp_path):
     """The expansion must not multiply results for a plain reference."""
     out = _scan(tmp_path, "/*\n * Copyright 2020 Acme\n * " + MIT_TEXT + "\n */\nint main(){}")
