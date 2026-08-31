@@ -41,17 +41,26 @@ class Cascade(AtarashiAgent):
     def __init__(self, licenseList, verbose=0, min_run=DEFAULT_MIN_RUN,
                  strong_run=DEFAULT_STRONG_RUN, min_coverage=DEFAULT_MIN_COVERAGE,
                  use_gate=True, use_notices=True, notice_path=None,
-                 use_ranker=True, ranker_path=None, top_k=DEFAULT_TOP_K):
+                 use_ranker=True, ranker_path=None, top_k=None):
         super().__init__(licenseList, verbose)
         self.min_run = min_run
         self.strong_run = strong_run
         self.min_coverage = min_coverage
-        self.top_k = top_k
+        self.top_k = DEFAULT_TOP_K if top_k is None else top_k
         self.use_gate = use_gate
         self.use_notices = use_notices
         self.notice_path = notice_path
         # Absent artifact => None => the hand-tuned ordering stands.
         self.ranker = load_ranker(ranker_path) if use_ranker else None
+        # The ranker standardises features *within* the candidate list, so list length
+        # is part of its training distribution and an artifact is only valid at the
+        # depth it was fit for. Running one at another depth is silent and severe —
+        # raising top_k 5 -> 20 at inference alone cost tail R@1 0.818 -> 0.652 — so
+        # the artifact carries its depth and it wins over the default. An explicit
+        # `top_k=` argument still overrides, which is what the sweep needs.
+        if top_k is None:
+            self.top_k = int(self.ranker.get("top_k", DEFAULT_TOP_K)) if self.ranker \
+                else DEFAULT_TOP_K
         self.matcher = LicenseMatcher(self._reference_units())
         # Token length of each license's own body, so a match can be recognised as
         # "the file *is* this license" rather than "the file cites it". That is the
