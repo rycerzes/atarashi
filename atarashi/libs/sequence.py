@@ -45,7 +45,7 @@ _BASE = 1 << 21
 # distinct shingles they share with the query, which upper-bounds the run length
 # they can produce, so a unit far down that ranking cannot win. Generous by design:
 # alignment is now cheap enough that the cap is a safety rail, not a tuning knob.
-DEFAULT_MAX_CANDIDATES = 400
+DEFAULT_MAX_CANDIDATES = 200
 
 # How many ranked candidates leave the matcher. Five was never swept: measured on the
 # Software Heritage tail, five of the six queries whose correct licence was "missing
