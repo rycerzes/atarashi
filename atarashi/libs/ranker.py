@@ -140,7 +140,7 @@ def featurize(matches, normalize: bool = True) -> list[list[float]]:
 _CACHE: dict[str, object] = {}
 
 
-def load_ranker(path: Path | None = None):
+def load_ranker(path: Path | None = None) -> dict | None:
     """The trained scorer, or None when absent — the caller keeps its own ordering."""
     target = Path(path or DEFAULT_RANKER)
     key = str(target)
