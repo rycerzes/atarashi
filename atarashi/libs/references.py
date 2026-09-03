@@ -54,7 +54,7 @@ _OPERATOR = re.compile(r"\s+(AND|OR|WITH)\s+", re.IGNORECASE)
 # So the short declarations that motivated the change — "licensed under MIT,",
 # "License : Apache-2.0" at three tokens — stay unreachable. They are 17 DEP-5 queries,
 # and buying them costs more elsewhere than they are worth.
-MIN_UNIT_TOKENS = 5
+MIN_UNIT_TOKENS = 3
 
 
 def expression_components(name: str) -> list[str]:

@@ -34,7 +34,7 @@ DEFAULT_MIN_RUN = 8
 
 # Alignment seeds on n-grams, so this is the shortest reference that can be matched
 # at all. Also the floor for indexing a reference unit: anything shorter is unusable.
-DEFAULT_SHINGLE = 4
+DEFAULT_SHINGLE = 3
 
 # Shingles are packed positionally into one int key. The base must be fixed before
 # indexing starts — deriving it from vocabulary size would re-key every unit as the
