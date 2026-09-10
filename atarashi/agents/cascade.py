@@ -6,6 +6,7 @@ SPDX-License-Identifier: GPL-2.0-only
 import os
 
 from atarashi.agents.atarashiAgent import AtarashiAgent
+from atarashi.libs.body import split_terms
 from atarashi.libs.commentPreprocessor import CommentPreprocessor
 from atarashi.libs.decision import (DEFAULT_MIN_COVERAGE, DEFAULT_STRONG_RUN,
                                     is_confident, unknown_result)
@@ -55,8 +56,11 @@ class Cascade(AtarashiAgent):
         # Token length of each license's own body, so a match can be recognised as
         # "the file *is* this license" rather than "the file cites it". That is the
         # only case where -only and -or-later are indistinguishable; see libs/orlater.
-        self._body_tokens = {str(row["shortname"]): len(tokens(str(row["processed_text"])))
-                             for _, row in self.licenseList.iterrows()}
+        # It is the *grant* that has to match, not grant-plus-appendix: the trailer is
+        # instructions to the licensor, and a file that omits it is still the license.
+        self._body_tokens = {
+            str(row["shortname"]): len(tokens(split_terms(str(row["processed_text"]))[0]))
+            for _, row in self.licenseList.iterrows()}
 
     def _reference_units(self):
         """Every matchable unit: full texts, headers, and the notice layer.
@@ -70,7 +74,16 @@ class Cascade(AtarashiAgent):
         has_header = "processed_header" in self.licenseList.columns
         for _, row in self.licenseList.iterrows():
             name = str(row["shortname"])
-            yield (name, str(row["processed_text"]))
+            # The grant and its "how to apply these terms" appendix are indexed as
+            # separate units. Real LICENSE files routinely stop at END OF TERMS AND
+            # CONDITIONS, and carrying the appendix inside the body made the license's
+            # own reference longer than a file that *is* that license — which handed
+            # Apache-2.0 files to `Pixar`, an Apache-2.0 copy without the appendix.
+            # See libs/body.py.
+            grant, appendix = split_terms(str(row["processed_text"]))
+            yield (name, grant)
+            if appendix:
+                yield (name, appendix)
             if has_header:
                 header = row["processed_header"]
                 if isinstance(header, str) and header.strip():
